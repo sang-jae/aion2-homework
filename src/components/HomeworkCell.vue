@@ -4,7 +4,7 @@ interface CounterCell {
   baseCurrent: number
   baseMax: number
   extraCurrent: number
-  extraMax: number  // 0 이면 '제한 없음' 으로 처리
+  extraMax: number // 0이면 제한 없음
 }
 
 const props = defineProps<{
@@ -40,100 +40,133 @@ function incExtra(delta: number) {
 
 <template>
   <div class="hw-cell">
-    <!-- 왼쪽 버튼들 (기본 남은 횟수 + / -) -->
-    <div class="hw-cell-btns">
-      <v-btn
-        size="x-small"
-        variant="outlined"
-        @click="incBase(+1)"
-      >
-        ▲
-      </v-btn>
-      <v-btn
-        size="x-small"
-        variant="outlined"
-        @click="incBase(-1)"
-      >
-        ▼
-      </v-btn>
-    </div>
+    <!-- 기본 카운트 -->
+    <div class="hw-counter">
+      <div class="hw-counter-header">기본</div>
 
-    <!-- 기본 숫자 (입력 가능) -->
-    <div class="hw-cell-block">
-      <v-text-field
-        v-model.number="props.cell.baseCurrent"
-        type="number"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="hw-number"
-        @blur="clampBase"
-      />
-      <div class="text-caption">
+      <div class="hw-counter-body">
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          class="hw-arrow"
+          @click="incBase(+1)"
+        >
+          <v-icon icon="mdi-chevron-up" size="16" />
+        </v-btn>
+
+        <v-text-field
+          v-model.number="props.cell.baseCurrent"
+          type="number"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="hw-number"
+          @blur="clampBase"
+        />
+
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          class="hw-arrow"
+          @click="incBase(-1)"
+        >
+          <v-icon icon="mdi-chevron-down" size="16" />
+        </v-btn>
+      </div>
+
+      <div class="hw-max">
         / {{ props.cell.baseMax }}
       </div>
     </div>
 
-    <!-- 추가 숫자 (입력 가능) -->
-    <div class="hw-cell-block">
-      <v-text-field
-        v-model.number="props.cell.extraCurrent"
-        type="number"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="hw-number"
-        @blur="clampExtra"
-      />
-      <div class="text-caption">
+    <!-- 추가 카운트 -->
+    <div class="hw-counter">
+      <div class="hw-counter-header">추가</div>
+
+      <div class="hw-counter-body">
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          class="hw-arrow"
+          @click="incExtra(+1)"
+        >
+          <v-icon icon="mdi-chevron-up" size="16" />
+        </v-btn>
+
+        <v-text-field
+          v-model.number="props.cell.extraCurrent"
+          type="number"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="hw-number"
+          @blur="clampExtra"
+        />
+
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          variant="text"
+          class="hw-arrow"
+          @click="incExtra(-1)"
+        >
+          <v-icon icon="mdi-chevron-down" size="16" />
+        </v-btn>
+      </div>
+
+      <div class="hw-max">
         / {{ props.cell.extraMax > 0 ? props.cell.extraMax : '∞' }}
       </div>
-    </div>
-
-    <!-- 오른쪽 버튼들 (추가 남은 횟수 + / -) -->
-    <div class="hw-cell-btns">
-      <v-btn
-        size="x-small"
-        variant="outlined"
-        @click="incExtra(+1)"
-      >
-        ▲
-      </v-btn>
-      <v-btn
-        size="x-small"
-        variant="outlined"
-        @click="incExtra(-1)"
-      >
-        ▼
-      </v-btn>
     </div>
   </div>
 </template>
 
 <style scoped>
 .hw-cell {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hw-counter {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hw-counter-header {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.hw-counter-body {
   display: grid;
-  grid-template-columns: auto 1fr 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 4px;
-}
-
-.hw-cell-btns {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.hw-cell-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.1;
-  gap: 2px;
 }
 
 .hw-number :deep(input) {
   text-align: center;
   padding-inline: 4px;
+  font-size: 13px;
+}
+
+.hw-max {
+  font-size: 11px;
+  text-align: right;
+  opacity: 0.7;
+}
+
+.hw-arrow {
+  min-width: 0;
 }
 </style>

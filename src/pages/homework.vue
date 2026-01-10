@@ -278,91 +278,98 @@ function handleAutoIncrease() {
 
 <template>
   <v-container class="py-8" fluid>
-    <h1 class="text-h4 mb-4">숙제표 체크리스트</h1>
+    <h1 class="text-h4 mb-2 font-weight-bold">숙제표 체크리스트</h1>
+    <p class="text-body-2 mb-6 opacity-70">
+      캐릭터별 숙제 현황을 기록하는 표입니다. 값은 브라우저에 저장되며 새로고침해도 유지됩니다.
+    </p>
 
-    <v-card class="pa-2">
-      <div class="hw-table-wrapper">
-        <v-table class="hw-table" density="comfortable">
-          <thead>
-            <tr>
-              <th class="hw-first-col text-left">
-                컨텐츠
-              </th>
+    <v-card class="hw-card" elevation="3">
+      <v-card-title class="d-flex align-center justify-space-between">
+        <div class="text-subtitle-1 font-weight-medium">
+          일일 / 주간 숙제 관리
+        </div>
+        <div class="d-flex align-center gap-2">
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="primary"
+            @click="openAddColumn"
+          >
+            + 캐릭터 추가
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="secondary"
+            @click="addRow"
+          >
+            + 숙제 추가
+          </v-btn>
+        </div>
+      </v-card-title>
 
-              <th
-                v-for="col in columns"
-                :key="col.id"
-                class="text-center"
-              >
-                <v-text-field
-                  v-model="col.name"
-                  variant="underlined"
-                  density="compact"
-                  hide-details
-                  class="hw-header-input"
-                />
-              </th>
+      <v-divider />
 
-              <!-- 열 추가 버튼 -->
-              <th class="hw-add-col text-center">
-                <v-btn
-                  size="small"
-                  variant="outlined"
-                  @click="openAddColumn"
+      <v-card-text class="pa-0">
+        <div class="hw-table-wrapper">
+          <v-table class="hw-table" density="comfortable">
+            <thead>
+              <tr>
+                <th class="hw-first-col text-left text-caption text-uppercase">
+                  컨텐츠
+                </th>
+
+                <th
+                  v-for="col in columns"
+                  :key="col.id"
+                  class="text-center"
                 >
-                  +
-                </v-btn>
-              </th>
-            </tr>
-          </thead>
+                  <v-text-field
+                    v-model="col.name"
+                    variant="underlined"
+                    density="compact"
+                    hide-details
+                    class="hw-header-input"
+                    placeholder="캐릭터명"
+                  />
+                </th>
+              </tr>
+            </thead>
 
-          <tbody>
-            <tr v-for="row in rows" :key="row.id">
-              <!-- 행 이름 -->
-              <td class="hw-first-col">
-                <v-text-field
-                  v-model="row.name"
-                  variant="plain"
-                  density="compact"
-                  hide-details
-                  class="hw-row-input"
-                />
-              </td>
+            <tbody>
+              <tr v-for="row in rows" :key="row.id">
+                <td class="hw-first-col">
+                  <v-text-field
+                    v-model="row.name"
+                    variant="plain"
+                    density="compact"
+                    hide-details
+                    class="hw-row-input"
+                  />
+                </td>
 
-              <!-- 칸(캐릭터별 숙제 카운터) -->
-              <td
-                v-for="col in columns"
-                :key="col.id"
-                class="pa-1"
-              >
-                <HomeworkCell
-                  :cell="getCell(row.id, col.id)"
-                  @change-base="(delta) => changeBase(row.id, col.id, delta)"
-                  @change-extra="(delta) => changeExtra(row.id, col.id, delta)"
-                />
-              </td>
-
-              <!-- 오른쪽 여백 -->
-              <td></td>
-            </tr>
-
-            <!-- 행 추가 버튼 -->
-            <tr>
-              <td>
-                <v-btn
-                  block
-                  variant="outlined"
-                  size="small"
-                  @click="addRow"
+                <td
+                  v-for="col in columns"
+                  :key="col.id"
+                  class="pa-2"
                 >
-                  + 행 추가
-                </v-btn>
-              </td>
-              <td :colspan="columns.length + 1"></td>
-            </tr>
-          </tbody>
-        </v-table>
-      </div>
+                  <HomeworkCell :cell="getCell(row.id, col.id)" />
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </div>
+      </v-card-text>
+
+      <v-card-actions class="justify-end">
+        <v-btn
+          size="small"
+          variant="text"
+          @click="resetAll"
+        >
+          전체 초기화
+        </v-btn>
+      </v-card-actions>
     </v-card>
 
     <!-- 캐릭터 추가 다이얼로그 -->
@@ -391,25 +398,45 @@ function handleAutoIncrease() {
 </template>
 
 <style scoped>
+.hw-card {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .hw-table-wrapper {
   overflow-x: auto;
 }
 
-/* 첫 번째 열(콘텐츠 이름) 조금 넓게 */
+.hw-table :deep(th),
+.hw-table :deep(td) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hw-table :deep(thead tr) {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
 .hw-first-col {
   min-width: 140px;
 }
 
-/* 캐릭터 추가 버튼 있는 마지막 열 */
-.hw-add-col {
-  min-width: 60px;
-}
-
 .hw-header-input :deep(input) {
   text-align: center;
+  font-size: 13px;
 }
 
 .hw-row-input :deep(input) {
   font-weight: 500;
+  font-size: 13px;
+}
+
+.opacity-70 {
+  opacity: 0.7;
+}
+
+/* Vuetify 3 에서는 간단히 gap 유틸이 없어서 임시 */
+.d-flex.gap-2 > * + * {
+  margin-left: 8px;
 }
 </style>
