@@ -1,10 +1,9 @@
-<!-- src/components/HomeworkCell.vue -->
 <script setup lang="ts">
 interface CounterCell {
   baseCurrent: number
   baseMax: number
   extraCurrent: number
-  extraMax: number // 0이면 제한 없음
+  extraMax: number
 }
 
 const props = defineProps<{
@@ -41,84 +40,72 @@ function incExtra(delta: number) {
 <template>
   <div class="hw-cell">
     <!-- 기본 -->
-    <div class="hw-counter">
-      <div class="hw-label">기본</div>
-
+    <div class="hw-counter hw-base">
       <div class="hw-body">
         <v-btn
-          icon
-          size="x-small"
-          variant="text"
-          class="hw-arrow"
-          @click="incBase(+1)"
-        >
-          <v-icon icon="mdi-chevron-up" size="18" />
-        </v-btn>
-
-        <v-text-field
-          v-model.number="props.cell.baseCurrent"
-          type="number"
-          density="compact"
-          variant="outlined"
-          hide-details
-          class="hw-number"
-          @blur="clampBase"
-        />
-
-        <v-btn
-          icon
           size="x-small"
           variant="text"
           class="hw-arrow"
           @click="incBase(-1)"
         >
-          <v-icon icon="mdi-chevron-down" size="18" />
+          ▼
         </v-btn>
-      </div>
 
-      <div class="hw-max">
-        / {{ props.cell.baseMax }}
+        <div class="hw-inline">
+          <input
+            class="hw-num hw-num-base"
+            type="number"
+            v-model.number="props.cell.baseCurrent"
+            @blur="clampBase"
+          />
+          <span class="hw-max hw-max-base">
+            / {{ props.cell.baseMax }}
+          </span>
+        </div>
+
+        <v-btn
+          size="x-small"
+          variant="text"
+          class="hw-arrow"
+          @click="incBase(+1)"
+        >
+          ▲
+        </v-btn>
       </div>
     </div>
 
     <!-- 추가 -->
-    <div class="hw-counter">
-      <div class="hw-label">추가</div>
-
+    <div class="hw-counter hw-extra">
       <div class="hw-body">
         <v-btn
-          icon
-          size="x-small"
-          variant="text"
-          class="hw-arrow"
-          @click="incExtra(+1)"
-        >
-          <v-icon icon="mdi-chevron-up" size="18" />
-        </v-btn>
-
-        <v-text-field
-          v-model.number="props.cell.extraCurrent"
-          type="number"
-          density="compact"
-          variant="outlined"
-          hide-details
-          class="hw-number"
-          @blur="clampExtra"
-        />
-
-        <v-btn
-          icon
           size="x-small"
           variant="text"
           class="hw-arrow"
           @click="incExtra(-1)"
         >
-          <v-icon icon="mdi-chevron-down" size="18" />
+          ▼
         </v-btn>
-      </div>
 
-      <div class="hw-max">
-        / {{ props.cell.extraMax > 0 ? props.cell.extraMax : '∞' }}
+        <div class="hw-inline">
+          <input
+            class="hw-num hw-num-extra"
+            type="number"
+            v-model.number="props.cell.extraCurrent"
+            @blur="clampExtra"
+          />
+          <span class="hw-max hw-max-extra">
+            / {{ props.cell.extraMax > 0 ? props.cell.extraMax : '∞' }}
+          </span>
+        </div>
+
+        <v-btn
+          size="x-small"
+          variant="text"
+          class="hw-arrow"
+          @click="incExtra(+1)"
+        >
+          ▲
+        </v-btn>
       </div>
     </div>
   </div>
@@ -141,11 +128,6 @@ function incExtra(delta: number) {
   gap: 4px;
 }
 
-.hw-label {
-  font-size: 11px;
-  opacity: 0.7;
-}
-
 .hw-body {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -153,19 +135,71 @@ function incExtra(delta: number) {
   gap: 4px;
 }
 
-.hw-number :deep(input) {
-  text-align: center;
-  font-size: 13px;
-  padding-inline: 4px;
+.hw-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
-.hw-max {
-  font-size: 11px;
+/* 숫자 input 공통 스타일 */
+.hw-num {
+  width: 50px;
+  background: transparent;
+  border: none;
+  outline: none;
   text-align: right;
-  opacity: 0.7;
+  font-weight: 700;
+  font-size: 26px; /* 기존보다 크게 */
+  padding: 0;
+  margin: 0;
+  -moz-appearance: textfield;
 }
 
+/* 크롬/엣지 number 스피너 제거 */
+.hw-num::-webkit-outer-spin-button,
+.hw-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 기본 = 흰색 */
+.hw-num-base {
+  color: #ffffff;
+}
+
+/* 추가 = 파란색 */
+.hw-num-extra {
+  color: #7fb5ff;
+}
+
+/* /max 텍스트 */
+.hw-max {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+/* Max 색상 구분 */
+.hw-max-base {
+  color: #ffffff;
+  opacity: 0.8;
+}
+
+.hw-max-extra {
+  color: #7fb5ff;
+  opacity: 0.8;
+}
+
+/* 화살표 버튼 */
 .hw-arrow {
-  min-width: 0;
+  min-width: 24px;
+  padding: 0;
+  line-height: 1;
+}
+
+.hw-base .hw-arrow {
+  color: #ffffff;
+}
+.hw-extra .hw-arrow {
+  color: #7fb5ff;
 }
 </style>

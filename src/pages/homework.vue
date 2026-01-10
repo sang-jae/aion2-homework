@@ -257,7 +257,10 @@ watch(
 let timerId: number | undefined
 
 onMounted(() => {
-  timerId = window.setInterval(handleAutoIncrease, 60_000) // 1분 간격
+  // 페이지 진입 시, 지난 시간 동안의 자동 증가 먼저 반영
+  handleAutoIncrease()
+  // 이후 1분마다 체크
+  timerId = window.setInterval(handleAutoIncrease, 60_000)
 })
 
 onBeforeUnmount(() => {
@@ -266,14 +269,233 @@ onBeforeUnmount(() => {
   }
 })
 
-function handleAutoIncrease() {
-  // TODO:
-  // 각 행(콘텐츠)별로 +1 / +2 되는 시간대를 코드/설정으로 넣으면
-  // 여기서 state.value.lastAutoUpdate 기준으로
-  // 지나간 만큼 증가시키는 로직을 구현하면 된다.
-  //
-  // 일단 지금은 동작하지 않고, 타이머 구조만 잡아둔 상태.
+const draggingColumnId = ref<string | null>(null)
+const dropPreview = ref<{ targetId: string; position: 'before' | 'after' } | null>(null)
+
+function onColumnDragStart(colId: string, event: DragEvent) {
+  draggingColumnId.value = colId
+  dropPreview.value = null
+
+  event.dataTransfer?.setData('text/plain', colId)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
 }
+
+function onColumnDragOver(colId: string, event: DragEvent) {
+  // 드롭 가능하게 하려면 필수
+  event.preventDefault()
+  if (!draggingColumnId.value || draggingColumnId.value === colId) {
+    dropPreview.value = null
+    return
+  }
+
+  const target = event.currentTarget as HTMLElement | null
+  let position: 'before' | 'after' = 'after'
+
+  if (target) {
+    const rect = target.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    position = x < rect.width / 2 ? 'before' : 'after'
+  }
+
+  dropPreview.value = { targetId: colId, position }
+
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onColumnDrop(colId: string, event: DragEvent) {
+  event.preventDefault()
+
+  const fromId = draggingColumnId.value
+  const preview = dropPreview.value
+  draggingColumnId.value = null
+  dropPreview.value = null
+
+  if (!fromId) return
+
+  const cols = state.value.columns
+  const fromIndex = cols.findIndex((c) => c.id === fromId)
+  let toIndex = cols.findIndex((c) => c.id === colId)
+
+  if (fromIndex === -1 || toIndex === -1) return
+  if (fromIndex === toIndex && !preview) return
+
+  // before/after 위치 보정
+  if (preview && preview.targetId === colId) {
+    if (preview.position === 'after') {
+      toIndex += 1
+    }
+  } else {
+    // preview 없으면 현재 컬럼 위치로 이동
+    // (기본 after 느낌)
+    toIndex += 1
+  }
+
+  // 원소를 뺀 뒤 삽입할 때 인덱스 보정
+  const [moved] = cols.splice(fromIndex, 1)
+  if (fromIndex < toIndex) {
+    toIndex -= 1
+  }
+  cols.splice(toIndex, 0, moved)
+}
+
+function onColumnDragEnd() {
+  draggingColumnId.value = null
+  dropPreview.value = null
+}
+
+
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+const WEEK_MS = 7 * DAY_MS
+
+function makeAnchorAtHour(hour: number) {
+  const d = new Date(0)
+  d.setHours(hour, 0, 0, 0) // 로컬시간 기준 hour 시
+  return d
+}
+
+// 5시 기준 앵커 (원정, 오드, 초월, 슈고 등)
+const ANCHOR_5 = makeAnchorAtHour(5)
+
+// 수요일 오전 5시 앵커 (일일던전, 각성전, 토벌전)
+const ANCHOR_WED_5 = (() => {
+  const d = makeAnchorAtHour(5)
+  // 1970-01-01 의 getDay() 기준으로 수요일(3)이 될 때까지 진행
+  while (d.getDay() !== 3) {
+    d.setDate(d.getDate() + 1)
+  }
+  return d
+})()
+
+/**
+ * last ~ now 사이에, anchor + n * periodMs 에 해당하는 이벤트가
+ * 몇 번 있었는지 계산 (last < t <= now)
+ */
+function countPeriodicEvents(
+  last: Date,
+  now: Date,
+  anchor: Date,
+  periodMs: number
+): number {
+  const lastMs = last.getTime()
+  const nowMs = now.getTime()
+  if (nowMs <= lastMs) return 0
+
+  const baseMs = anchor.getTime()
+  const fromIndex = Math.floor((lastMs - baseMs) / periodMs)
+  const toIndex = Math.floor((nowMs - baseMs) / periodMs)
+
+  return Math.max(0, toIndex - fromIndex)
+}
+
+function addBaseToRow(rowId: string, amount: number) {
+  if (amount <= 0) return
+  for (const col of state.value.columns) {
+    const cell = getCell(rowId, col.id)
+    const max = cell.baseMax
+    if (max > 0) {
+      cell.baseCurrent = Math.min(max, cell.baseCurrent + amount)
+    } else {
+      cell.baseCurrent += amount
+    }
+  }
+}
+
+function setBaseToMax(rowId: string) {
+  for (const col of state.value.columns) {
+    const cell = getCell(rowId, col.id)
+    const max = cell.baseMax
+    if (max > 0) {
+      cell.baseCurrent = max
+    }
+  }
+}
+
+function handleAutoIncrease() {
+  const now = new Date()
+
+  let last = new Date(state.value.lastAutoUpdate || now.toISOString())
+  if (isNaN(last.getTime())) {
+    last = now
+  }
+
+  // 미래로 꼬여 있으면 리셋
+  if (now.getTime() <= last.getTime()) {
+    state.value.lastAutoUpdate = now.toISOString()
+    return
+  }
+
+  // --- 원정 정복 : 매일 5시/13시/21시 +1 (8시간 주기, 5시 시작) ---
+  const expeditionEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    8 * HOUR_MS
+  )
+  if (expeditionEvents > 0) {
+    addBaseToRow('row-expedition', expeditionEvents * 1)
+  }
+
+  // --- 오드 : 매일 5시부터 3시간 단위로 +15 ---
+  const odeEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    3 * HOUR_MS
+  )
+  if (odeEvents > 0) {
+    addBaseToRow('row-ode', odeEvents * 15)
+  }
+
+  // --- 초월 : 매일 5시 / 17시마다 +1 (12시간 주기, 5시 시작) ---
+  const chowolEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    12 * HOUR_MS
+  )
+  if (chowolEvents > 0) {
+    addBaseToRow('row-chowol', chowolEvents * 1)
+  }
+
+  // --- 슈고 : 매일 5시에 +2 (24시간 주기, 5시 시작) ---
+  const shugoEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    DAY_MS
+  )
+  if (shugoEvents > 0) {
+    addBaseToRow('row-shugo', shugoEvents * 2)
+  }
+
+  // --- 일일던전 / 각성전 / 토벌전 : 매주 수요일 5시 ---
+  const weeklyEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_WED_5,
+    WEEK_MS
+  )
+
+  if (weeklyEvents > 0) {
+    // 일일던전 : +7 -> 최대치 7이라 걍 max로 맞춤
+    setBaseToMax('row-daily')   // baseMax = 7
+
+    // 각성전 : +3 -> baseMax 3
+    setBaseToMax('row-awaken')  // baseMax = 3
+
+    // 토벌전 : +3 -> baseMax 3
+    setBaseToMax('row-boss')    // baseMax = 3
+  }
+
+  // 마지막 계산 시각 갱신
+  state.value.lastAutoUpdate = now.toISOString()
+}
+
 </script>
 
 <template>
@@ -297,14 +519,14 @@ function handleAutoIncrease() {
           >
             + 캐릭터 추가
           </v-btn>
-          <v-btn
+          <!-- <v-btn
             size="small"
             variant="tonal"
             color="secondary"
             @click="addRow"
           >
             + 숙제 추가
-          </v-btn>
+          </v-btn> -->
         </div>
       </v-card-title>
 
@@ -313,28 +535,48 @@ function handleAutoIncrease() {
       <v-card-text class="pa-0">
         <div class="hw-table-wrapper">
           <v-table class="hw-table" density="comfortable">
-            <thead>
-              <tr>
-                <th class="hw-first-col text-left text-caption text-uppercase">
-                  컨텐츠
-                </th>
+						<thead>
+							<tr>
+								<th class="hw-first-col text-left text-caption text-uppercase">
+									컨텐츠
+								</th>
 
-                <th
-                  v-for="col in columns"
-                  :key="col.id"
-                  class="text-center"
-                >
-                  <v-text-field
-                    v-model="col.name"
-                    variant="underlined"
-                    density="compact"
-                    hide-details
-                    class="hw-header-input"
-                    placeholder="캐릭터명"
-                  />
-                </th>
-              </tr>
-            </thead>
+								<th
+									v-for="col in columns"
+									:key="col.id"
+									class="text-center hw-col-header"
+									@dragover="(e) => onColumnDragOver(col.id, e)"
+									@drop="(e) => onColumnDrop(col.id, e)"
+									@dragend="onColumnDragEnd"
+									:class="{
+										'hw-drop-before':
+											dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'before',
+										'hw-drop-after':
+											dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'after',
+									}"
+								>
+									<div class="hw-col-header-inner">
+										<!-- 🔼 이 바 전체가 드래그 핸들 + 텍스트 점점점 -->
+										<div
+											class="hw-col-handle-bar"
+											draggable="true"
+											@dragstart="(e) => onColumnDragStart(col.id, e)"
+										>
+											<span class="hw-col-dots">⋯</span>
+										</div>
+
+										<v-text-field
+											v-model="col.name"
+											variant="underlined"
+											density="compact"
+											hide-details
+											class="hw-header-input"
+											placeholder="캐릭터명"
+										/>
+									</div>
+								</th>
+							</tr>
+						</thead>
 
             <tbody>
               <tr v-for="row in rows" :key="row.id">
@@ -361,7 +603,7 @@ function handleAutoIncrease() {
         </div>
       </v-card-text>
 
-      <v-card-actions class="justify-end">
+      <!-- <v-card-actions class="justify-end">
         <v-btn
           size="small"
           variant="text"
@@ -369,7 +611,7 @@ function handleAutoIncrease() {
         >
           전체 초기화
         </v-btn>
-      </v-card-actions>
+      </v-card-actions> -->
     </v-card>
 
     <!-- 캐릭터 추가 다이얼로그 -->
@@ -421,6 +663,69 @@ function handleAutoIncrease() {
   min-width: 150px;
 }
 
+.hw-col-header {
+  position: relative;
+	padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.hw-col-header-inner {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 드래그 핸들 바 */
+.hw-col-handle-bar {
+  width: 100%;                    /* ⭐ 전체 가로 꽉 채우기 */
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.15);
+  cursor: grab;
+  user-select: none;
+  border-radius: 0px;
+  transition: background-color 0.15s, opacity 0.15s;
+  opacity: 0.9;
+  box-sizing: border-box;         /* ⭐ padding/테두리 있어도 100% 유지 */
+}
+
+.hw-col-handle-bar:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  opacity: 1;
+}
+
+.hw-col-handle-bar:active {
+  cursor: grabbing;
+  background-color: rgba(255, 255, 255, 0.32);
+}
+
+/* 점점점 표시 */
+.hw-col-dots {
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+
+/* 드롭 프리뷰 라인 그대로 */
+.hw-col-header.hw-drop-before::before,
+.hw-col-header.hw-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 999px;
+  background-color: rgb(144, 202, 249);
+}
+
+.hw-col-header.hw-drop-before::before {
+  left: -2px;
+}
+
+.hw-col-header.hw-drop-after::after {
+  right: -2px;
+}
+/* 기존 캐릭터 입력 스타일은 그대로 유지 */
 .hw-header-input :deep(input) {
   text-align: center;
   font-size: 13px;
