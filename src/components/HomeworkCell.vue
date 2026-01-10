@@ -40,11 +40,11 @@ function incExtra(delta: number) {
 
 <template>
   <div class="hw-cell">
-    <!-- 기본 카운트 -->
+    <!-- 기본 -->
     <div class="hw-counter">
-      <div class="hw-counter-header">기본</div>
+      <div class="hw-label">기본</div>
 
-      <div class="hw-counter-body">
+      <div class="hw-body">
         <v-btn
           icon
           size="x-small"
@@ -52,7 +52,7 @@ function incExtra(delta: number) {
           class="hw-arrow"
           @click="incBase(+1)"
         >
-          <v-icon icon="mdi-chevron-up" size="16" />
+          <v-icon icon="mdi-chevron-up" size="18" />
         </v-btn>
 
         <v-text-field
@@ -72,7 +72,7 @@ function incExtra(delta: number) {
           class="hw-arrow"
           @click="incBase(-1)"
         >
-          <v-icon icon="mdi-chevron-down" size="16" />
+          <v-icon icon="mdi-chevron-down" size="18" />
         </v-btn>
       </div>
 
@@ -81,11 +81,11 @@ function incExtra(delta: number) {
       </div>
     </div>
 
-    <!-- 추가 카운트 -->
+    <!-- 추가 -->
     <div class="hw-counter">
-      <div class="hw-counter-header">추가</div>
+      <div class="hw-label">추가</div>
 
-      <div class="hw-counter-body">
+      <div class="hw-body">
         <v-btn
           icon
           size="x-small"
@@ -93,7 +93,7 @@ function incExtra(delta: number) {
           class="hw-arrow"
           @click="incExtra(+1)"
         >
-          <v-icon icon="mdi-chevron-up" size="16" />
+          <v-icon icon="mdi-chevron-up" size="18" />
         </v-btn>
 
         <v-text-field
@@ -110,11 +110,10 @@ function incExtra(delta: number) {
           icon
           size="x-small"
           variant="text"
-          variant="text"
           class="hw-arrow"
           @click="incExtra(-1)"
         >
-          <v-icon icon="mdi-chevron-down" size="16" />
+          <v-icon icon="mdi-chevron-down" size="18" />
         </v-btn>
       </div>
 
@@ -128,11 +127,11 @@ function incExtra(delta: number) {
 <style scoped>
 .hw-cell {
   display: flex;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .hw-counter {
@@ -142,12 +141,12 @@ function incExtra(delta: number) {
   gap: 4px;
 }
 
-.hw-counter-header {
+.hw-label {
   font-size: 11px;
   opacity: 0.7;
 }
 
-.hw-counter-body {
+.hw-body {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -156,8 +155,8 @@ function incExtra(delta: number) {
 
 .hw-number :deep(input) {
   text-align: center;
-  padding-inline: 4px;
   font-size: 13px;
+  padding-inline: 4px;
 }
 
 .hw-max {

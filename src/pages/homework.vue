@@ -288,7 +288,7 @@ function handleAutoIncrease() {
         <div class="text-subtitle-1 font-weight-medium">
           일일 / 주간 숙제 관리
         </div>
-        <div class="d-flex align-center gap-2">
+        <div class="d-flex hw-actions">
           <v-btn
             size="small"
             variant="tonal"
@@ -400,8 +400,8 @@ function handleAutoIncrease() {
 <style scoped>
 .hw-card {
   background-color: rgba(255, 255, 255, 0.03);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .hw-table-wrapper {
@@ -414,11 +414,11 @@ function handleAutoIncrease() {
 }
 
 .hw-table :deep(thead tr) {
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .hw-first-col {
-  min-width: 140px;
+  min-width: 150px;
 }
 
 .hw-header-input :deep(input) {
@@ -427,7 +427,7 @@ function handleAutoIncrease() {
 }
 
 .hw-row-input :deep(input) {
-  font-weight: 500;
+  font-weight: 600;
   font-size: 13px;
 }
 
@@ -435,8 +435,8 @@ function handleAutoIncrease() {
   opacity: 0.7;
 }
 
-/* Vuetify 3 에서는 간단히 gap 유틸이 없어서 임시 */
-.d-flex.gap-2 > * + * {
+/* Vuetify gap 유틸 대신 */
+.hw-actions > * + * {
   margin-left: 8px;
 }
 </style>
