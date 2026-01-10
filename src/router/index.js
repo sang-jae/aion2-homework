@@ -5,12 +5,12 @@
  */
 
 // Composables
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { setupLayouts } from 'virtual:generated-layouts'
 import { routes } from 'vue-router/auto-routes'
 
 const router = createRouter({
-  history: createWebHistory('/aion2-homework/'),
+  history: createWebHashHistory('/aion2-homework/'),
   routes: setupLayouts(routes),
 })
 
