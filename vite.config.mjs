@@ -50,6 +50,12 @@ export default defineConfig({
       vueTemplate: true,
     }),
   ],
+  // 📌 GitHub Pages에서 쓸 서브 경로 (레포 이름이랑 똑같이!)
+  base: '/aion2-homework/',
+  // 📌 빌드 결과를 docs 폴더로 (GitHub Pages에서 바로 쓸 수 있게)
+  build: {
+    outDir: 'docs',
+  },
   optimizeDeps: {
     exclude: [
       'vuetify',
