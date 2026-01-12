@@ -3,6 +3,40 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import HomeworkCell from '@/components/HomeworkCell.vue'
 
+type RowDef = {
+  id: string
+  label: string
+  baseMax?: number
+  extraMax?: number
+  isSection?: boolean
+}
+
+const rowDefs: RowDef[] = [
+  // 섹션: 티켓
+  { id: 'section-ticket', label: '티켓', isSection: true },
+
+  { id: 'row-ode', label: '오드', baseMax: 840, extraMax: 2000 },
+  { id: 'row-expedition', label: '원정 정복', baseMax: 21, extraMax: -1 },
+  { id: 'row-chowol', label: '초월', baseMax: 14, extraMax: -1 },
+  { id: 'row-shugo', label: '슈고', baseMax: 14, extraMax: 30 },
+
+  // 🔹 새 컨텐츠: 차원침공 (티켓 섹션)
+  { id: 'row-dimension', label: '차원침공', baseMax: 7, extraMax: 0 },
+
+  // 섹션: 일일
+  { id: 'section-daily', label: '일일', isSection: true },
+
+  // 🔹 새 컨텐츠: 사명퀘스트
+  { id: 'row-mission', label: '사명퀘스트', baseMax: 5, extraMax: 0 },
+
+  // 섹션: 주간
+  { id: 'section-weekly', label: '주간', isSection: true },
+
+  { id: 'row-daily', label: '일일던전', baseMax: 7, extraMax: 30 },
+  { id: 'row-awaken', label: '각성전', baseMax: 3, extraMax: 30 },
+  { id: 'row-boss', label: '토벌전', baseMax: 3, extraMax: 30 },
+]
+
 interface CounterCell {
   baseCurrent: number
   baseMax: number
@@ -15,9 +49,25 @@ interface HomeworkRow {
   name: string
 }
 
+/* 🔹 캐릭터 컬럼 모드 (정복 / 초월 / 성역) */
+type ColumnModeKey = 'conquest' | 'transcend' | 'sanctuary'
+
+interface ColumnModeState {
+  x2: boolean
+}
+
 interface CharacterColumn {
   id: string
   name: string
+  modes: Record<ColumnModeKey, ColumnModeState>
+}
+
+function createDefaultModes(): Record<ColumnModeKey, ColumnModeState> {
+  return {
+    conquest: { x2: false },
+    transcend: { x2: false },
+    sanctuary: { x2: false },
+  }
 }
 
 interface HomeworkState {
@@ -31,8 +81,8 @@ const STORAGE_KEY = 'aion2-homework-state-v1'
 
 // 기본 행/열
 const defaultRows: HomeworkRow[] = [
-  { id: 'row-expedition', name: '원정 정복' },
   { id: 'row-ode',        name: '오드' },
+  { id: 'row-expedition', name: '원정 정복' },
   { id: 'row-chowol',     name: '초월' },
   { id: 'row-daily',      name: '일일던전' },
   { id: 'row-awaken',     name: '각성전' },
@@ -41,48 +91,63 @@ const defaultRows: HomeworkRow[] = [
 ]
 
 const defaultColumns: CharacterColumn[] = [
-  { id: 'char-1', name: '캐릭터명1' },
+  { id: 'char-1', name: '캐릭터명1', modes: createDefaultModes() },
 ]
 
 // 🔹 행별 최대치 설정
-// extraMax 가 0 이면 "제한 없음"
 const rowMaxConfig: Record<string, { baseMax: number; extraMax: number }> = {
   'row-shugo': {
-    baseMax: 14,  // 슈고 기본
-    extraMax: 30, // 슈고 추가
+    baseMax: 14,
+    extraMax: 30,
   },
   'row-expedition': {
-    baseMax: 21,  // 원정 기본
-    extraMax: 0,  // 제한 없음
+    baseMax: 21,
+    extraMax: 0, // 무한
   },
   'row-ode': {
-    baseMax: 840, // 오드 기본
-    extraMax: 2000, // 오드 추가
+    baseMax: 840,
+    extraMax: 2000,
   },
   'row-chowol': {
-    baseMax: 14, // 초월 기본
-    extraMax: 0, // 제한 없음
+    baseMax: 14,
+    extraMax: 0, // 무한
   },
   'row-daily': {
-    baseMax: 7,  // 일일던전 기본
-    extraMax: 30, // 일일던전 추가
+    baseMax: 7,
+    extraMax: 30,
   },
   'row-awaken': {
-    baseMax: 3,  // 각성전 기본
-    extraMax: 30, // 각성전 추가
+    baseMax: 3,
+    extraMax: 30,
   },
   'row-boss': {
-    baseMax: 3,  // 토벌전 기본
-    extraMax: 30, // 토벌전 추가
+    baseMax: 3,
+    extraMax: 30,
   },
 }
 
-// 셀 템플릿 (최대치는 행별 설정으로 덮어씀)
+// 셀 템플릿
 const defaultCell: CounterCell = {
   baseCurrent: 0,
   baseMax: 0,
   extraCurrent: 0,
   extraMax: 0,
+}
+
+// 🔹 저장본에서 modes 없을 때 보정
+function ensureColumnModes(columns: CharacterColumn[]) {
+  for (const col of columns as any[]) {
+    const base = createDefaultModes()
+    if (!col.modes) {
+      col.modes = base
+    } else {
+      col.modes = {
+        conquest: { ...base.conquest, ...(col.modes.conquest ?? {}) },
+        transcend: { ...base.transcend, ...(col.modes.transcend ?? {}) },
+        sanctuary: { ...base.sanctuary, ...(col.modes.sanctuary ?? {}) },
+      }
+    }
+  }
 }
 
 // 초기 상태 로드 (localStorage → 없으면 기본값)
@@ -93,7 +158,7 @@ function loadInitialState(): HomeworkState {
       try {
         const parsed = JSON.parse(saved) as HomeworkState
         if (parsed && parsed.rows && parsed.columns && parsed.cells) {
-          // 예전 저장본에도 최대치 새로 적용
+          ensureColumnModes(parsed.columns)
           applyMaxConfig(parsed)
           return parsed
         }
@@ -146,7 +211,6 @@ function applyMaxConfig(target: HomeworkState) {
         cell.extraMax = config.extraMax
       }
 
-      // 범위 보정
       if (cell.baseCurrent < 0) cell.baseCurrent = 0
       if (cell.extraCurrent < 0) cell.extraCurrent = 0
       if (cell.baseMax > 0 && cell.baseCurrent > cell.baseMax) {
@@ -159,28 +223,39 @@ function applyMaxConfig(target: HomeworkState) {
   }
 }
 
-function getCell(rowId: string, colId: string): CounterCell {
-  const key = cellKey(rowId, colId)
-  const cells = state.value.cells
+function getRowDef(rowId: string) {
+  return rowDefs.find(r => r.id === rowId)
+}
 
-  if (!cells[key]) {
-    const config = rowMaxConfig[rowId]
-    cells[key] = {
+function getCell(rowId: string, colId: string) {
+  const key = `${rowId}__${colId}`
+  let cell = state.value.cells[key]
+  const rowDef = getRowDef(rowId)
+
+  if (!cell) {
+    cell = {
       baseCurrent: 0,
+      baseMax: rowDef?.baseMax ?? 0,
       extraCurrent: 0,
-      baseMax: config ? config.baseMax : 0,
-      extraMax: config ? config.extraMax : 0,
+      extraMax: rowDef?.extraMax ?? 0,
     }
-  } else {
-    // 혹시 저장된 데이터에 max가 0으로 남아있으면 행 설정으로 덮어준다
-    const config = rowMaxConfig[rowId]
-    if (config) {
-      cells[key].baseMax = config.baseMax
-      cells[key].extraMax = config.extraMax
+    state.value.cells[key] = cell
+  } else if (rowDef) {
+    if (typeof rowDef.baseMax === 'number') {
+      cell.baseMax = rowDef.baseMax
+      if (cell.baseCurrent > cell.baseMax) {
+        cell.baseCurrent = cell.baseMax
+      }
+    }
+    if (typeof rowDef.extraMax === 'number') {
+      cell.extraMax = rowDef.extraMax
+      if (cell.extraMax > 0 && cell.extraCurrent > cell.extraMax) {
+        cell.extraCurrent = cell.extraMax
+      }
     }
   }
 
-  return cells[key]
+  return cell
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -213,7 +288,7 @@ function addRow() {
   state.value.rows.push({ id, name: trimmed })
 
   for (const col of state.value.columns) {
-    getCell(id, col.id) // 생성 + 최대치 세팅
+    getCell(id, col.id)
   }
 }
 
@@ -232,10 +307,9 @@ function confirmAddColumn() {
   if (!name) return
 
   const id = `char-${Date.now()}`
-  state.value.columns.push({ id, name })
+  state.value.columns.push({ id, name, modes: createDefaultModes() })
 
   for (const row of state.value.rows) {
-    // 여기서 getCell을 호출하면 위에서 최대치까지 자동 세팅
     getCell(row.id, id)
   }
 
@@ -253,13 +327,11 @@ watch(
   { deep: true }
 )
 
-// 자동 증가용 타이머 골격 (지금은 구조만 잡아둠)
+// 자동 증가용 타이머
 let timerId: number | undefined
 
 onMounted(() => {
-  // 페이지 진입 시, 지난 시간 동안의 자동 증가 먼저 반영
   handleAutoIncrease()
-  // 이후 1분마다 체크
   timerId = window.setInterval(handleAutoIncrease, 60_000)
 })
 
@@ -283,7 +355,6 @@ function onColumnDragStart(colId: string, event: DragEvent) {
 }
 
 function onColumnDragOver(colId: string, event: DragEvent) {
-  // 드롭 가능하게 하려면 필수
   event.preventDefault()
   if (!draggingColumnId.value || draggingColumnId.value === colId) {
     dropPreview.value = null
@@ -323,18 +394,14 @@ function onColumnDrop(colId: string, event: DragEvent) {
   if (fromIndex === -1 || toIndex === -1) return
   if (fromIndex === toIndex && !preview) return
 
-  // before/after 위치 보정
   if (preview && preview.targetId === colId) {
     if (preview.position === 'after') {
       toIndex += 1
     }
   } else {
-    // preview 없으면 현재 컬럼 위치로 이동
-    // (기본 after 느낌)
     toIndex += 1
   }
 
-  // 원소를 뺀 뒤 삽입할 때 인덱스 보정
   const [moved] = cols.splice(fromIndex, 1)
   if (fromIndex < toIndex) {
     toIndex -= 1
@@ -347,34 +414,26 @@ function onColumnDragEnd() {
   dropPreview.value = null
 }
 
-
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 const WEEK_MS = 7 * DAY_MS
 
 function makeAnchorAtHour(hour: number) {
   const d = new Date(0)
-  d.setHours(hour, 0, 0, 0) // 로컬시간 기준 hour 시
+  d.setHours(hour, 0, 0, 0)
   return d
 }
 
-// 5시 기준 앵커 (원정, 오드, 초월, 슈고 등)
 const ANCHOR_5 = makeAnchorAtHour(5)
 
-// 수요일 오전 5시 앵커 (일일던전, 각성전, 토벌전)
 const ANCHOR_WED_5 = (() => {
   const d = makeAnchorAtHour(5)
-  // 1970-01-01 의 getDay() 기준으로 수요일(3)이 될 때까지 진행
   while (d.getDay() !== 3) {
     d.setDate(d.getDate() + 1)
   }
   return d
 })()
 
-/**
- * last ~ now 사이에, anchor + n * periodMs 에 해당하는 이벤트가
- * 몇 번 있었는지 계산 (last < t <= now)
- */
 function countPeriodicEvents(
   last: Date,
   now: Date,
@@ -423,13 +482,11 @@ function handleAutoIncrease() {
     last = now
   }
 
-  // 미래로 꼬여 있으면 리셋
   if (now.getTime() <= last.getTime()) {
     state.value.lastAutoUpdate = now.toISOString()
     return
   }
 
-  // --- 원정 정복 : 매일 5시/13시/21시 +1 (8시간 주기, 5시 시작) ---
   const expeditionEvents = countPeriodicEvents(
     last,
     now,
@@ -440,7 +497,6 @@ function handleAutoIncrease() {
     addBaseToRow('row-expedition', expeditionEvents * 1)
   }
 
-  // --- 오드 : 매일 5시부터 3시간 단위로 +15 ---
   const odeEvents = countPeriodicEvents(
     last,
     now,
@@ -451,7 +507,6 @@ function handleAutoIncrease() {
     addBaseToRow('row-ode', odeEvents * 15)
   }
 
-  // --- 초월 : 매일 5시 / 17시마다 +1 (12시간 주기, 5시 시작) ---
   const chowolEvents = countPeriodicEvents(
     last,
     now,
@@ -462,7 +517,6 @@ function handleAutoIncrease() {
     addBaseToRow('row-chowol', chowolEvents * 1)
   }
 
-  // --- 슈고 : 매일 5시에 +2 (24시간 주기, 5시 시작) ---
   const shugoEvents = countPeriodicEvents(
     last,
     now,
@@ -473,28 +527,54 @@ function handleAutoIncrease() {
     addBaseToRow('row-shugo', shugoEvents * 2)
   }
 
-  // --- 일일던전 / 각성전 / 토벌전 : 매주 수요일 5시 ---
   const weeklyEvents = countPeriodicEvents(
     last,
     now,
     ANCHOR_WED_5,
     WEEK_MS
   )
-
   if (weeklyEvents > 0) {
-    // 일일던전 : +7 -> 최대치 7이라 걍 max로 맞춤
-    setBaseToMax('row-daily')   // baseMax = 7
-
-    // 각성전 : +3 -> baseMax 3
-    setBaseToMax('row-awaken')  // baseMax = 3
-
-    // 토벌전 : +3 -> baseMax 3
-    setBaseToMax('row-boss')    // baseMax = 3
+    setBaseToMax('row-daily')
+    setBaseToMax('row-awaken')
+    setBaseToMax('row-boss')
   }
 
-  // 마지막 계산 시각 갱신
+  // 차원침공 : 매일 5시, +1
+  const dimensionEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    DAY_MS
+  )
+  if (dimensionEvents > 0) {
+    addBaseToRow('row-dimension', dimensionEvents * 1)
+  }
+
+  // 사명퀘스트 : 매일 5시, baseMax(5) 까지
+  const missionEvents = countPeriodicEvents(
+    last,
+    now,
+    ANCHOR_5,
+    DAY_MS
+  )
+  if (missionEvents > 0) {
+    setBaseToMax('row-mission')
+  }
+
   state.value.lastAutoUpdate = now.toISOString()
+
+
 }
+
+watch(
+  () => state.value.columns,
+  (newCols, oldCols) => {
+    console.log('📌 columns changed')
+    console.log('old:', oldCols)
+    console.log('new:', newCols)
+  },
+  { deep: true }
+)
 
 </script>
 
@@ -519,14 +599,6 @@ function handleAutoIncrease() {
           >
             + 캐릭터 추가
           </v-btn>
-          <!-- <v-btn
-            size="small"
-            variant="tonal"
-            color="secondary"
-            @click="addRow"
-          >
-            + 숙제 추가
-          </v-btn> -->
         </div>
       </v-card-title>
 
@@ -535,83 +607,165 @@ function handleAutoIncrease() {
       <v-card-text class="pa-0">
         <div class="hw-table-wrapper">
           <v-table class="hw-table" density="comfortable">
-						<thead>
-							<tr>
-								<th class="hw-first-col text-left text-caption text-uppercase">
-									컨텐츠
-								</th>
+            <thead>
+              <tr>
+                <th class="hw-first-col text-left text-caption text-uppercase">
+                  컨텐츠
+                </th>
 
-								<th
-									v-for="col in columns"
-									:key="col.id"
-									class="text-center hw-col-header"
-									@dragover="(e) => onColumnDragOver(col.id, e)"
-									@drop="(e) => onColumnDrop(col.id, e)"
-									@dragend="onColumnDragEnd"
-									:class="{
-										'hw-drop-before':
-											dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'before',
-										'hw-drop-after':
-											dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'after',
-									}"
-								>
-									<div class="hw-col-header-inner">
-										<!-- 🔼 이 바 전체가 드래그 핸들 + 텍스트 점점점 -->
-										<div
-											class="hw-col-handle-bar"
-											draggable="true"
-											@dragstart="(e) => onColumnDragStart(col.id, e)"
-										>
-											<span class="hw-col-dots">⋯</span>
-										</div>
-
-										<v-text-field
-											v-model="col.name"
-											variant="underlined"
-											density="compact"
-											hide-details
-											class="hw-header-input"
-											placeholder="캐릭터명"
-										/>
-									</div>
-								</th>
-							</tr>
-						</thead>
-
-            <tbody>
-              <tr v-for="row in rows" :key="row.id">
-                <td class="hw-first-col">
-                  <v-text-field
-                    v-model="row.name"
-                    variant="plain"
-                    density="compact"
-                    hide-details
-                    class="hw-row-input"
-                  />
-                </td>
-
-                <td
+                <th
                   v-for="col in columns"
                   :key="col.id"
-                  class="pa-2"
+                  class="text-center hw-col-header"
+                  @dragover="(e) => onColumnDragOver(col.id, e)"
+                  @drop="(e) => onColumnDrop(col.id, e)"
+                  @dragend="onColumnDragEnd"
+                  :class="{
+                    'hw-drop-before':
+                      dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'before',
+                    'hw-drop-after':
+                      dropPreview && dropPreview.targetId === col.id && dropPreview.position === 'after',
+                  }"
                 >
-                  <HomeworkCell :cell="getCell(row.id, col.id)" />
-                </td>
+                  <div class="hw-col-header-inner">
+                    <div
+                      class="hw-col-handle-bar"
+                      draggable="true"
+                      @dragstart="(e) => onColumnDragStart(col.id, e)"
+                    >
+                      <span class="hw-col-dots">⋯</span>
+                    </div>
+                    <div class="hw-col-header-content">
+                      
+                      <v-text-field
+                        v-model="col.name"
+                        variant="underlined"
+                        density="compact"
+                        hide-details
+                        class="hw-header-input"
+                        placeholder="캐릭터명"
+                      />
+
+                      <!-- 🔹 정복 / 초월 / 성역 모드 줄 -->
+                      <div class="hw-mode-row">
+                        <!-- 정복 -->
+                        <div class="hw-mode-card">
+                          <!-- 왼쪽: 라벨 -->
+                          <div class="hw-mode-left">
+                            <span class="hw-mode-label">정복</span>
+                          </div>
+
+                          <!-- 오른쪽: X2 + undo -->
+                          <div class="hw-mode-right">
+                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                              <input type="checkbox" v-model="col.modes.conquest.x2" />
+                              <span class="hw-x2-box" aria-hidden="true"></span>
+                              <span class="hw-x2-text">x2</span>
+                            </label>
+
+                            <v-btn
+                              class="hw-undo-btn"
+                              icon
+                              size="x-small"
+                              variant="flat"
+                              @click.stop
+                            >
+                              ↶
+                            </v-btn>
+                          </div>
+                        </div>
+
+                        <!-- 초월 -->
+                        <div class="hw-mode-card">
+                          <!-- 왼쪽: 라벨 -->
+                          <div class="hw-mode-left">
+                            <span class="hw-mode-label">초월</span>
+                          </div>
+
+                          <!-- 오른쪽: X2 + undo -->
+                          <div class="hw-mode-right">
+                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                              <input type="checkbox" v-model="col.modes.transcend.x2" />
+                              <span class="hw-x2-box" aria-hidden="true"></span>
+                              <span class="hw-x2-text">x2</span>
+                            </label>
+
+                            <v-btn
+                              class="hw-undo-btn"
+                              icon
+                              size="x-small"
+                              variant="flat"
+                              @click.stop
+                            >
+                              ↶
+                            </v-btn>
+                          </div>
+                        </div>
+
+                        <!-- 성역 -->
+                        <div class="hw-mode-card">
+                          <!-- 왼쪽: 라벨 -->
+                          <div class="hw-mode-left">
+                            <span class="hw-mode-label">성역</span>
+                          </div>
+
+                          <!-- 오른쪽: X2 + undo -->
+                          <div class="hw-mode-right">
+                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                              <input type="checkbox" v-model="col.modes.sanctuary.x2" />
+                              <span class="hw-x2-box" aria-hidden="true"></span>
+                              <span class="hw-x2-text">x2</span>
+                            </label>
+
+                            <v-btn
+                              class="hw-undo-btn"
+                              icon
+                              size="x-small"
+                              variant="flat"
+                              @click.stop
+                            >
+                              ↶
+                            </v-btn>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  </div>
+                </th>
               </tr>
+            </thead>
+
+            <tbody>
+              <template v-for="row in rowDefs" :key="row.id">
+                <!-- 섹션 헤더 -->
+                <tr v-if="row.isSection" class="hw-section-row">
+                  <td
+                    class="hw-section-cell"
+                    :colspan="columns.length + 1"
+                  >
+                    {{ row.label }}
+                  </td>
+                </tr>
+
+                <!-- 실제 컨텐츠 행 -->
+                <tr v-else class="hw-row">
+                  <td class="hw-first-col">
+                    {{ row.label }}
+                  </td>
+
+                  <td
+                    v-for="col in columns"
+                    :key="col.id"
+                  >
+                    <HomeworkCell :cell="getCell(row.id, col.id)" />
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </v-table>
         </div>
       </v-card-text>
-
-      <!-- <v-card-actions class="justify-end">
-        <v-btn
-          size="small"
-          variant="text"
-          @click="resetAll"
-        >
-          전체 초기화
-        </v-btn>
-      </v-card-actions> -->
     </v-card>
 
     <!-- 캐릭터 추가 다이얼로그 -->
@@ -665,7 +819,7 @@ function handleAutoIncrease() {
 
 .hw-col-header {
   position: relative;
-	padding-left: 0 !important;
+  padding-left: 0 !important;
   padding-right: 0 !important;
 }
 
@@ -676,7 +830,7 @@ function handleAutoIncrease() {
 
 /* 드래그 핸들 바 */
 .hw-col-handle-bar {
-  width: 100%;                    /* ⭐ 전체 가로 꽉 채우기 */
+  width: 100%;
   height: 22px;
   display: flex;
   align-items: center;
@@ -687,7 +841,7 @@ function handleAutoIncrease() {
   border-radius: 0px;
   transition: background-color 0.15s, opacity 0.15s;
   opacity: 0.9;
-  box-sizing: border-box;         /* ⭐ padding/테두리 있어도 100% 유지 */
+  box-sizing: border-box;
 }
 
 .hw-col-handle-bar:hover {
@@ -700,13 +854,11 @@ function handleAutoIncrease() {
   background-color: rgba(255, 255, 255, 0.32);
 }
 
-/* 점점점 표시 */
 .hw-col-dots {
   font-size: 16px;
   letter-spacing: 2px;
 }
 
-/* 드롭 프리뷰 라인 그대로 */
 .hw-col-header.hw-drop-before::before,
 .hw-col-header.hw-drop-after::after {
   content: '';
@@ -725,7 +877,7 @@ function handleAutoIncrease() {
 .hw-col-header.hw-drop-after::after {
   right: -2px;
 }
-/* 기존 캐릭터 입력 스타일은 그대로 유지 */
+
 .hw-header-input :deep(input) {
   text-align: center;
   font-size: 13px;
@@ -740,8 +892,180 @@ function handleAutoIncrease() {
   opacity: 0.7;
 }
 
-/* Vuetify gap 유틸 대신 */
+/* actions gap */
 .hw-actions > * + * {
   margin-left: 8px;
 }
+
+.hw-section-row {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.hw-section-cell {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 🔹 정복 / 초월 / 성역 UI */
+
+
+.hw-mode-top {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.hw-mode-x2-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Vuetify 체크박스 여백 줄이기 */
+.hw-mode-checkbox :deep(.v-selection-control) {
+  padding: 0;
+  margin: 0;
+}
+.hw-mode-checkbox :deep(.v-icon) {
+  font-size: 16px;
+}
+
+.hw-mode-x2-label {
+  font-size: 11px;
+  color: #7fb5ff;
+}
+
+.hw-mode-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+.hw-mode-undo {
+  min-width: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: #9fd3ff;
+}
+
+/* ✅ 드래그바 아래 내용만 좌우 여백 주기 */
+.hw-col-header-content {
+  padding: 0 10px 8px;   /* 여기 값이 아래 td랑 폭 느낌 맞춰줌 */
+}
+
+/* 3개 카드 한 줄 */
+.hw-mode-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* 카드 자체: 좌/우 분할 */
+
+.hw-mode-card {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 64px; /* 오른쪽 폭 고정(체크+undo) */
+  align-items: stretch;
+
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  overflow: hidden;
+}
+
+/* 왼쪽 라벨 영역 */
+.hw-mode-left {
+  display: flex;
+  align-items: center;
+  padding: 10px 10px;
+}
+
+.hw-mode-label {
+  font-size: 20px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.02em;
+}
+
+/* 오른쪽 영역: 구분선 + 위아래 배치 */
+.hw-mode-right {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 13px 13px;
+}
+
+/* X2 체크 영역 */
+.hw-x2 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 10px;
+}
+
+/* 실제 input 숨기고 커스텀 박스 */
+.hw-x2 input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 체크박스 테두리(구분 확실히) */
+.hw-x2-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+  display: inline-block;
+}
+
+/* 체크된 상태 표시 */
+.hw-x2 input:checked + .hw-x2-box {
+  border-color: rgba(144, 202, 249, 0.95);
+  background: rgba(144, 202, 249, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(144, 202, 249, 0.35);
+}
+
+/* x2 텍스트 */
+.hw-x2-text {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.88);
+  text-transform: uppercase;
+}
+
+/* 되돌리기 원형 버튼 - “버튼처럼” 보이게 */
+.hw-undo-btn {
+  align-self: flex-end;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px !important;
+  font-size: 18px;
+
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: white !important;
+
+  margin-top: 10px;
+  padding-top: 3px;
+}
+
+.hw-undo-btn:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+
+
 </style>

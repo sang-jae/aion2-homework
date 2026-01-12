@@ -1,0 +1,1 @@
+import{_ as a,c as e,o,w as r,b as s}from"./index--3HggMH7.js";import{V as c}from"./VContainer-CEP3shVD.js";const n={};function f(l,t){return o(),e(c,{class:"py-8"},{default:r(()=>[...t[0]||(t[0]=[s("h1",{class:"text-h4 mb-4"},"제작템 비용 계산기",-1),s("p",{class:"text-body-1"}," 나중에 계산 로직 넣을 페이지입니다. 지금은 자리만 잡아둘게요. ",-1)])]),_:1})}const d=a(n,[["render",f]]);export{d as default};
