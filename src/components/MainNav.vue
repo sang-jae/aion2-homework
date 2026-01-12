@@ -9,7 +9,7 @@ const router = useRouter()
 const items = [
   { title: '홈',        to: '/' },
   { title: '숙제',      to: '/homework' },
-  { title: '계산기',    to: '/calcurator' }, // 요청하신 대로 철자 그대로
+  //{ title: '계산기',    to: '/calculator' },
 ]
 
 function go(to: string) {

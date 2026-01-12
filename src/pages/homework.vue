@@ -138,14 +138,18 @@ const defaultCell: CounterCell = {
 function ensureColumnModes(columns: CharacterColumn[]) {
   for (const col of columns as any[]) {
     const base = createDefaultModes()
-    if (!col.modes) {
-      col.modes = base
-    } else {
-      col.modes = {
-        conquest: { ...base.conquest, ...(col.modes.conquest ?? {}) },
-        transcend: { ...base.transcend, ...(col.modes.transcend ?? {}) },
-        sanctuary: { ...base.sanctuary, ...(col.modes.sanctuary ?? {}) },
-      }
+    if (!col.modes) col.modes = base
+
+    col.modes = {
+      conquest: { ...base.conquest, ...(col.modes.conquest ?? {}) },
+      transcend: { ...base.transcend, ...(col.modes.transcend ?? {}) },
+      sanctuary: { ...base.sanctuary, ...(col.modes.sanctuary ?? {}) },
+    }
+
+    // lastAction 타입 깨진 저장본 방어
+    for (const k of ['conquest', 'transcend', 'sanctuary'] as ColumnModeKey[]) {
+      const a = col.modes[k].lastAction
+      if (a && typeof a !== 'object') col.modes[k].lastAction = undefined
     }
   }
 }
@@ -262,6 +266,169 @@ function clamp(value: number, min: number, max: number) {
   if (value < min) return min
   if (value > max) return max
   return value
+}
+
+function isInfiniteExtra(cell: CounterCell) {
+  return cell.extraMax < 0
+}
+
+function hasExtraBucket(cell: CounterCell) {
+  // extraMax === 0 이면 "추가 자체 없음"으로 취급
+  return cell.extraMax !== 0
+}
+
+function planDeduct(cell: CounterCell, amount: number): { base: number; extra: number } | null {
+  if (amount <= 0) return { base: 0, extra: 0 }
+
+  const baseAvail = Math.max(0, cell.baseCurrent)
+  const extraAvail = hasExtraBucket(cell) ? Math.max(0, cell.extraCurrent) : 0
+  const total = baseAvail + extraAvail
+
+  if (total < amount) return null
+
+  const baseUse = Math.min(baseAvail, amount)
+  const extraUse = amount - baseUse
+  return { base: baseUse, extra: extraUse }
+}
+
+function applyDeduct(cell: CounterCell, d: { base: number; extra: number }) {
+  cell.baseCurrent = Math.max(0, cell.baseCurrent - d.base)
+  if (hasExtraBucket(cell)) {
+    cell.extraCurrent = Math.max(0, cell.extraCurrent - d.extra)
+  }
+}
+
+function applyAdd(cell: CounterCell, d: { base: number; extra: number }) {
+  // base는 max 있으면 clamp
+  if (cell.baseMax > 0) {
+    cell.baseCurrent = Math.min(cell.baseMax, cell.baseCurrent + d.base)
+  } else {
+    cell.baseCurrent = cell.baseCurrent + d.base
+  }
+
+  // extra
+  if (hasExtraBucket(cell)) {
+    if (isInfiniteExtra(cell)) {
+      cell.extraCurrent = cell.extraCurrent + d.extra
+    } else if (cell.extraMax > 0) {
+      cell.extraCurrent = Math.min(cell.extraMax, cell.extraCurrent + d.extra)
+    } else {
+      // extraMax === 0이면 bucket 자체 없음(무시)
+    }
+  }
+}
+
+function getCol(colId: string) {
+  return state.value.columns.find(c => c.id === colId)
+}
+
+function doConquest(colId: string) {
+  const col = getCol(colId)
+  if (!col) return
+
+  const x2 = !!col.modes.conquest.x2
+  const odeCost = x2 ? 80 : 40
+
+  const ticketCell = getCell('row-expedition', colId)
+  const odeCell = getCell('row-ode', colId)
+
+  const ticketDeduct = planDeduct(ticketCell, 1)
+  if (!ticketDeduct) {
+    window.alert('정복 티켓이 부족하여 완료 체크를 할 수 없습니다.')
+    return
+  }
+
+  const odeDeduct = planDeduct(odeCell, odeCost)
+  if (!odeDeduct) {
+    window.alert('오드가 부족하여 완료 체크를 할 수 없습니다.')
+    return
+  }
+
+  // 둘 다 가능할 때만 실제 차감
+  applyDeduct(ticketCell, ticketDeduct)
+  applyDeduct(odeCell, odeDeduct)
+
+  col.modes.conquest.lastAction = {
+    ticket: { rowId: 'row-expedition', ...ticketDeduct },
+    ode: { rowId: 'row-ode', ...odeDeduct },
+    at: new Date().toISOString(),
+  }
+}
+
+function doTranscend(colId: string) {
+  const col = getCol(colId)
+  if (!col) return
+
+  const x2 = !!col.modes.transcend.x2
+  const odeCost = x2 ? 80 : 40
+
+  const ticketCell = getCell('row-chowol', colId)
+  const odeCell = getCell('row-ode', colId)
+
+  const ticketDeduct = planDeduct(ticketCell, 1)
+  if (!ticketDeduct) {
+    window.alert('초월 티켓이 부족하여 완료 체크를 할 수 없습니다.')
+    return
+  }
+
+  const odeDeduct = planDeduct(odeCell, odeCost)
+  if (!odeDeduct) {
+    window.alert('오드가 부족하여 완료 체크를 할 수 없습니다.')
+    return
+  }
+
+  applyDeduct(ticketCell, ticketDeduct)
+  applyDeduct(odeCell, odeDeduct)
+
+  col.modes.transcend.lastAction = {
+    ticket: { rowId: 'row-chowol', ...ticketDeduct },
+    ode: { rowId: 'row-ode', ...odeDeduct },
+    at: new Date().toISOString(),
+  }
+}
+
+function doSanctuary(colId: string) {
+  const col = getCol(colId)
+  if (!col) return
+
+  const odeCost = 40 // 성역은 요구사항상 항상 40
+
+  const odeCell = getCell('row-ode', colId)
+  const odeDeduct = planDeduct(odeCell, odeCost)
+
+  if (!odeDeduct) {
+    window.alert('오드가 부족하여 완료 체크를 할 수 없습니다.')
+    return
+  }
+
+  applyDeduct(odeCell, odeDeduct)
+
+  col.modes.sanctuary.lastAction = {
+    ode: { rowId: 'row-ode', ...odeDeduct },
+    at: new Date().toISOString(),
+  }
+}
+
+function undoMode(colId: string, mode: ColumnModeKey) {
+  const col = getCol(colId)
+  if (!col) return
+
+  const action = col.modes[mode].lastAction
+  if (!action) return
+
+  // ticket 복원
+  if (action.ticket) {
+    const cell = getCell(action.ticket.rowId, colId)
+    applyAdd(cell, { base: action.ticket.base, extra: action.ticket.extra })
+  }
+
+  // ode 복원
+  if (action.ode) {
+    const cell = getCell(action.ode.rowId, colId)
+    applyAdd(cell, { base: action.ode.base, extra: action.ode.extra })
+  }
+
+  col.modes[mode].lastAction = undefined
 }
 
 // 버튼 동작들
@@ -566,15 +733,39 @@ function handleAutoIncrease() {
 
 }
 
-watch(
-  () => state.value.columns,
-  (newCols, oldCols) => {
-    console.log('📌 columns changed')
-    console.log('old:', oldCols)
-    console.log('new:', newCols)
-  },
-  { deep: true }
-)
+
+// 버튼 동작 추가
+interface ColumnDeductLog {
+  rowId: string
+  base: number
+  extra: number
+}
+
+interface ColumnModeAction {
+  ticket?: ColumnDeductLog
+  ode?: ColumnDeductLog
+  at: string
+}
+
+interface ColumnModeState {
+  x2: boolean
+  lastAction?: ColumnModeAction
+}
+
+
+
+
+
+
+// watch(
+//   () => state.value.columns,
+//   (newCols, oldCols) => {
+//     console.log('📌 columns changed')
+//     console.log('old:', oldCols)
+//     console.log('new:', newCols)
+//   },
+//   { deep: true }
+// )
 
 </script>
 
@@ -649,7 +840,7 @@ watch(
                       <!-- 🔹 정복 / 초월 / 성역 모드 줄 -->
                       <div class="hw-mode-row">
                         <!-- 정복 -->
-                        <div class="hw-mode-card">
+                        <div class="hw-mode-card" @click="doConquest(col.id)">
                           <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">정복</span>
@@ -668,7 +859,7 @@ watch(
                               icon
                               size="x-small"
                               variant="flat"
-                              @click.stop
+                              @click.stop="undoMode(col.id, 'conquest')"
                             >
                               ↶
                             </v-btn>
@@ -676,7 +867,7 @@ watch(
                         </div>
 
                         <!-- 초월 -->
-                        <div class="hw-mode-card">
+                        <div class="hw-mode-card" @click="doTranscend(col.id)">
                           <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">초월</span>
@@ -695,7 +886,7 @@ watch(
                               icon
                               size="x-small"
                               variant="flat"
-                              @click.stop
+                              @click.stop="undoMode(col.id, 'transcend')"
                             >
                               ↶
                             </v-btn>
@@ -703,26 +894,26 @@ watch(
                         </div>
 
                         <!-- 성역 -->
-                        <div class="hw-mode-card">
+                        <div class="hw-mode-card" @click="doSanctuary(col.id)">
                           <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">성역</span>
                           </div>
 
                           <!-- 오른쪽: X2 + undo -->
-                          <div class="hw-mode-right">
-                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                          <div class="hw-mode-right hw-sanctuary-check">
+                            <!-- <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
                               <input type="checkbox" v-model="col.modes.sanctuary.x2" />
                               <span class="hw-x2-box" aria-hidden="true"></span>
                               <span class="hw-x2-text">x2</span>
-                            </label>
+                            </label> -->
 
                             <v-btn
                               class="hw-undo-btn"
                               icon
                               size="x-small"
                               variant="flat"
-                              @click.stop
+                              @click.stop="undoMode(col.id, 'sanctuary')"
                             >
                               ↶
                             </v-btn>
@@ -1059,7 +1250,6 @@ watch(
   border: 1px solid rgba(255, 255, 255, 0.16) !important;
   color: white !important;
 
-  margin-top: 10px;
   padding-top: 3px;
 }
 
@@ -1067,5 +1257,7 @@ watch(
   background: rgba(255, 255, 255, 0.18) !important;
 }
 
-
+.hw-sanctuary-check {
+  margin:auto;
+}
 </style>
