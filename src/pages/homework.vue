@@ -74,7 +74,8 @@ interface HomeworkState {
   rows: HomeworkRow[]
   columns: CharacterColumn[]
   cells: Record<string, CounterCell>
-  lastAutoUpdate: string
+  lastAutoUpdate: string,
+  membership: boolean   // ✅ 추가
 }
 
 const STORAGE_KEY = 'aion2-homework-state-v1'
@@ -163,6 +164,12 @@ function loadInitialState(): HomeworkState {
         const parsed = JSON.parse(saved) as HomeworkState
         if (parsed && parsed.rows && parsed.columns && parsed.cells) {
           ensureColumnModes(parsed.columns)
+
+          // ✅ 저장본에 membership 없으면 기본 false
+          if (typeof (parsed as any).membership !== 'boolean') {
+            ;(parsed as any).membership = false
+          }
+
           applyMaxConfig(parsed)
           return parsed
         }
@@ -178,6 +185,7 @@ function loadInitialState(): HomeworkState {
     columns: defaultColumns,
     cells,
     lastAutoUpdate: new Date().toISOString(),
+    membership: false, // ✅ 추가
   }
 
   for (const row of defaultRows) {
@@ -483,6 +491,36 @@ function confirmAddColumn() {
   addColumnDialog.value = false
 }
 
+// 열(캐릭터) 삭제
+function removeColumn(colId: string) {
+  // ✅ 옵션: 마지막 1개는 삭제 못하게
+  if (state.value.columns.length <= 1) {
+    window.alert('캐릭터는 최소 1개는 남아야 합니다.')
+    return
+  }
+
+  // ✅ 옵션: 삭제 확인
+  const col = state.value.columns.find(c => c.id === colId)
+  const name = col?.name?.trim() || '캐릭터'
+  if (!window.confirm(`"${name}" 칸을 삭제할까요?`)) return
+
+  const idx = state.value.columns.findIndex(c => c.id === colId)
+  if (idx === -1) return
+
+  // 1) columns에서 제거
+  state.value.columns.splice(idx, 1)
+
+  // 2) cells에서 해당 colId에 해당하는 키들 제거
+  for (const row of state.value.rows) {
+    const key = cellKey(row.id, colId)
+    delete state.value.cells[key]
+  }
+
+  // 3) 드래그 상태 정리
+  if (draggingColumnId.value === colId) draggingColumnId.value = null
+  if (dropPreview.value?.targetId === colId) dropPreview.value = null
+}
+
 // localStorage 저장
 watch(
   state,
@@ -592,6 +630,8 @@ function makeAnchorAtHour(hour: number) {
 }
 
 const ANCHOR_5 = makeAnchorAtHour(5)
+// 테스트용
+const ANCHOR_2 = makeAnchorAtHour(2)
 
 const ANCHOR_WED_5 = (() => {
   const d = makeAnchorAtHour(5)
@@ -691,7 +731,8 @@ function handleAutoIncrease() {
     DAY_MS
   )
   if (shugoEvents > 0) {
-    addBaseToRow('row-shugo', shugoEvents * 2)
+    const perDay = state.value.membership ? 2 : 1
+    addBaseToRow('row-shugo', shugoEvents * perDay)
   }
 
   const weeklyEvents = countPeriodicEvents(
@@ -828,14 +869,27 @@ interface ColumnModeState {
                     </div>
                     <div class="hw-col-header-content">
                       
-                      <v-text-field
-                        v-model="col.name"
-                        variant="underlined"
-                        density="compact"
-                        hide-details
-                        class="hw-header-input"
-                        placeholder="캐릭터명"
-                      />
+                      <!-- 캐릭터명 + 삭제버튼 한 줄 -->
+                      <div class="hw-name-row">
+                        <v-text-field
+                          v-model="col.name"
+                          variant="underlined"
+                          density="compact"
+                          hide-details
+                          class="hw-header-input"
+                          placeholder="캐릭터명"
+                        />
+
+                        <v-btn
+                          class="hw-col-remove-inline"
+                          size="x-small"
+                          variant="flat"
+                          @click.stop="removeColumn(col.id)"
+                          title="캐릭터 삭제"
+                        >
+                          -
+                        </v-btn>
+                      </div>
 
                       <!-- 🔹 정복 / 초월 / 성역 모드 줄 -->
                       <div class="hw-mode-row">
@@ -942,7 +996,15 @@ interface ColumnModeState {
                 <!-- 실제 컨텐츠 행 -->
                 <tr v-else class="hw-row">
                   <td class="hw-first-col">
-                    {{ row.label }}
+                    <div class="hw-row-title">
+                      <span>{{ row.label }}</span>
+
+                      <!-- ✅ 슈고일 때만 멤버십 체크박스 -->
+                      <label v-if="row.id === 'row-shugo'" class="hw-membership">
+                        <input type="checkbox" v-model="state.membership" />
+                        <span class="hw-membership-text">멤버십</span>
+                      </label>
+                    </div>
                   </td>
 
                   <td
@@ -1259,5 +1321,69 @@ interface ColumnModeState {
 
 .hw-sanctuary-check {
   margin:auto;
+}
+
+/* 캐릭터명 입력줄 + 삭제버튼 */
+.hw-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 입력창이 줄의 대부분 차지 */
+.hw-name-row .hw-header-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 🔴 캐릭터 삭제 버튼 (입력창 옆) */
+.hw-col-remove-inline {
+  min-width: 26px !important;
+  width: 26px !important;
+  height: 26px !important;
+
+  padding: 0 !important;
+  border-radius: 8px !important;
+
+  background: #e53935 !important;
+  color: #fff !important;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.hw-col-remove-inline:hover {
+  filter: brightness(1.05);
+}
+
+
+/* 행 타이틀: 왼쪽 라벨 + 오른쪽 옵션 */
+.hw-row-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 슈고 멤버십 체크 */
+.hw-membership {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+/* 체크박스 크기 살짝 키우기 */
+.hw-membership input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+.hw-membership-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
 }
 </style>
