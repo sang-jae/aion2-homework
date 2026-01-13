@@ -772,7 +772,7 @@ interface ColumnModeState {
 <template>
   <v-container class="py-8" fluid>
     <h1 class="text-h4 mb-2 font-weight-bold">숙제표 체크리스트</h1>
-    <p class="text-body-2 mb-6 opacity-70">
+    <p class="text-body-1 mb-6 opacity-70">
       캐릭터별 숙제 현황을 기록하는 표입니다. 값은 브라우저에 저장되며 새로고침해도 유지됩니다.
     </p>
 

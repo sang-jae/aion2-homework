@@ -60,7 +60,8 @@ function go(to: string) {
 
 /* 텍스트는 그대로, 필요하면 살짝 키워도 됨 */
 .nav-title {
+  font-family: 'Jeongmeokbawi';
   font-weight: 700;
-  font-size: 18px;
+  font-size: 25px;
 }
 </style>
