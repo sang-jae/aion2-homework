@@ -93,7 +93,8 @@ interface HomeworkState {
  *  Defaults / Keys
  *  ========================= */
 
-const STORAGE_KEY = 'aion2-homework-state-v2'
+const STORAGE_KEY_V2 = 'aion2-homework-state-v2'
+const STORAGE_KEY_V1 = 'aion2-homework-state-v1'
 
 const defaultColumns: CharacterColumn[] = [
   { id: 'char-1', name: '캐릭터명1', modes: createDefaultModes() },
@@ -248,10 +249,11 @@ function applyAdd(cell: CounterCell, d: { base: number; extra: number }) {
 
 function loadInitialState(): HomeworkState {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
+    // 1) 먼저 v2 시도
+    const savedV2 = localStorage.getItem(STORAGE_KEY_V2)
+    if (savedV2) {
       try {
-        const parsed = JSON.parse(saved) as HomeworkState
+        const parsed = JSON.parse(savedV2) as HomeworkState
         if (parsed && parsed.columns && parsed.cells) {
           ensureColumnModes(parsed.columns)
 
@@ -259,7 +261,6 @@ function loadInitialState(): HomeworkState {
             ;(parsed as any).membership = false
           }
 
-          // activeRowIds 보정
           if (!Array.isArray((parsed as any).activeRowIds)) {
             ;(parsed as any).activeRowIds = [...defaultActiveRowIds]
           } else {
@@ -275,8 +276,43 @@ function loadInitialState(): HomeworkState {
         // ignore
       }
     }
+
+    // 2) v2 없으면 v1 로드해서 v2 형태로 마이그레이션
+    const savedV1 = localStorage.getItem(STORAGE_KEY_V1)
+    if (savedV1) {
+      try {
+        const v1 = JSON.parse(savedV1) as any
+
+        if (v1 && v1.columns && v1.cells) {
+          // v1에는 rows가 있었을 수도 있는데 우리는 rowDefs/activeRowIds로 관리
+          const migrated: HomeworkState = {
+            columns: v1.columns,
+            cells: v1.cells,
+            lastAutoUpdate: v1.lastAutoUpdate || new Date().toISOString(),
+            membership: typeof v1.membership === 'boolean' ? v1.membership : false,
+            activeRowIds: [...defaultActiveRowIds], // v1은 전체 컨텐츠를 항상 보여줬으니 기본 전체 활성
+          }
+
+          ensureColumnModes(migrated.columns)
+
+          // 혹시 v1 columns에 modes가 없는 예전 저장본이면 보정
+          applyMaxConfig(migrated)
+
+          // ✅ v2로 저장(마이그레이션 완료)
+          localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(migrated))
+
+          // ✅ 원하면 v1 삭제까지 하고 싶으면 아래 주석 해제
+          // localStorage.removeItem(STORAGE_KEY_V1)
+
+          return migrated
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 
+  // 3) 아무것도 없으면 새로 생성
   const base: HomeworkState = {
     columns: defaultColumns,
     cells: {},
@@ -285,7 +321,6 @@ function loadInitialState(): HomeworkState {
     activeRowIds: [...defaultActiveRowIds],
   }
 
-  // 기본 셀 생성(마스터 기준으로 모두 만들어두면 안전)
   for (const row of rowDefs.filter(r => !r.isSection)) {
     for (const col of base.columns) {
       base.cells[cellKey(row.id, col.id)] = { ...defaultCell }
@@ -800,7 +835,7 @@ watch(
   state,
   (val) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
+      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(val))
     }
   },
   { deep: true }
