@@ -3,39 +3,51 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import HomeworkCell from '@/components/HomeworkCell.vue'
 
+/** =========================
+ *  RowDefs (전체 컨텐츠 마스터)
+ *  ========================= */
+
+type SectionKey = 'ticket' | 'daily' | 'weekly'
+
 type RowDef = {
   id: string
   label: string
   baseMax?: number
   extraMax?: number
   isSection?: boolean
+  sectionKey?: SectionKey
 }
 
 const rowDefs: RowDef[] = [
   // 섹션: 티켓
-  { id: 'section-ticket', label: '티켓', isSection: true },
+  { id: 'section-ticket', label: '티켓', isSection: true, sectionKey: 'ticket' },
 
-  { id: 'row-ode', label: '오드', baseMax: 840, extraMax: 2000 },
-  { id: 'row-expedition', label: '원정 정복', baseMax: 21, extraMax: -1 },
-  { id: 'row-chowol', label: '초월', baseMax: 14, extraMax: -1 },
-  { id: 'row-shugo', label: '슈고', baseMax: 14, extraMax: 30 },
-
-  // 🔹 새 컨텐츠: 차원침공 (티켓 섹션)
-  { id: 'row-dimension', label: '차원침공', baseMax: 7, extraMax: 0 },
+  { id: 'row-ode', label: '오드', baseMax: 840, extraMax: 2000, sectionKey: 'ticket' },
+  { id: 'row-expedition', label: '원정 정복', baseMax: 21, extraMax: -1, sectionKey: 'ticket' },
+  { id: 'row-chowol', label: '초월', baseMax: 14, extraMax: -1, sectionKey: 'ticket' },
+  { id: 'row-shugo', label: '슈고', baseMax: 14, extraMax: 30, sectionKey: 'ticket' },
+  { id: 'row-dimension', label: '차원침공', baseMax: 7, extraMax: 0, sectionKey: 'ticket' },
 
   // 섹션: 일일
-  { id: 'section-daily', label: '일일', isSection: true },
+  { id: 'section-daily', label: '일일', isSection: true, sectionKey: 'daily' },
 
-  // 🔹 새 컨텐츠: 사명퀘스트
-  { id: 'row-mission', label: '사명퀘스트', baseMax: 5, extraMax: 0 },
+  { id: 'row-mission', label: '사명퀘스트', baseMax: 5, extraMax: 0, sectionKey: 'daily' },
 
   // 섹션: 주간
-  { id: 'section-weekly', label: '주간', isSection: true },
+  { id: 'section-weekly', label: '주간', isSection: true, sectionKey: 'weekly' },
 
-  { id: 'row-daily', label: '일일던전', baseMax: 7, extraMax: 30 },
-  { id: 'row-awaken', label: '각성전', baseMax: 3, extraMax: 30 },
-  { id: 'row-boss', label: '토벌전', baseMax: 3, extraMax: 30 },
+  { id: 'row-daily', label: '일일던전', baseMax: 7, extraMax: 30, sectionKey: 'weekly' },
+  { id: 'row-awaken', label: '각성전', baseMax: 3, extraMax: 30, sectionKey: 'weekly' },
+  { id: 'row-boss', label: '토벌전', baseMax: 3, extraMax: 30, sectionKey: 'weekly' },
 ]
+
+function getRowDefById(id: string) {
+  return rowDefs.find(r => r.id === id)
+}
+
+/** =========================
+ *  Types
+ *  ========================= */
 
 interface CounterCell {
   baseCurrent: number
@@ -44,22 +56,70 @@ interface CounterCell {
   extraMax: number
 }
 
-interface HomeworkRow {
-  id: string
-  name: string
+type ColumnModeKey = 'conquest' | 'transcend' | 'sanctuary'
+
+interface ColumnDeductLog {
+  rowId: string
+  base: number
+  extra: number
 }
 
-/* 🔹 캐릭터 컬럼 모드 (정복 / 초월 / 성역) */
-type ColumnModeKey = 'conquest' | 'transcend' | 'sanctuary'
+interface ColumnModeAction {
+  ticket?: ColumnDeductLog
+  ode?: ColumnDeductLog
+  at: string
+}
 
 interface ColumnModeState {
   x2: boolean
+  lastAction?: ColumnModeAction
 }
 
 interface CharacterColumn {
   id: string
   name: string
   modes: Record<ColumnModeKey, ColumnModeState>
+}
+
+interface HomeworkState {
+  columns: CharacterColumn[]
+  cells: Record<string, CounterCell>
+  lastAutoUpdate: string
+  membership: boolean
+  activeRowIds: string[] // ✅ 활성 컨텐츠 + 순서
+}
+
+/** =========================
+ *  Defaults / Keys
+ *  ========================= */
+
+const STORAGE_KEY = 'aion2-homework-state-v2'
+
+const defaultColumns: CharacterColumn[] = [
+  { id: 'char-1', name: '캐릭터명1', modes: createDefaultModes() },
+]
+
+const defaultActiveRowIds = [
+  'row-ode',
+  'row-expedition',
+  'row-chowol',
+  'row-shugo',
+  'row-dimension',
+  'row-mission',
+  'row-daily',
+  'row-awaken',
+  'row-boss',
+]
+
+const defaultCell: CounterCell = {
+  baseCurrent: 0,
+  baseMax: 0,
+  extraCurrent: 0,
+  extraMax: 0,
+}
+
+function cellKey(rowId: string, colId: string) {
+  return `${rowId}__${colId}`
 }
 
 function createDefaultModes(): Record<ColumnModeKey, ColumnModeState> {
@@ -70,72 +130,54 @@ function createDefaultModes(): Record<ColumnModeKey, ColumnModeState> {
   }
 }
 
-interface HomeworkState {
-  rows: HomeworkRow[]
-  columns: CharacterColumn[]
-  cells: Record<string, CounterCell>
-  lastAutoUpdate: string,
-  membership: boolean   // ✅ 추가
-}
-
-const STORAGE_KEY = 'aion2-homework-state-v1'
-
-// 기본 행/열
-const defaultRows: HomeworkRow[] = [
-  { id: 'row-ode',        name: '오드' },
-  { id: 'row-expedition', name: '원정 정복' },
-  { id: 'row-chowol',     name: '초월' },
-  { id: 'row-daily',      name: '일일던전' },
-  { id: 'row-awaken',     name: '각성전' },
-  { id: 'row-boss',       name: '토벌전' },
-  { id: 'row-shugo',      name: '슈고' },
-]
-
-const defaultColumns: CharacterColumn[] = [
-  { id: 'char-1', name: '캐릭터명1', modes: createDefaultModes() },
-]
-
-// 🔹 행별 최대치 설정
+/** =========================
+ *  Row max config (★ TDZ 방지: loadInitialState보다 위에 있어야 함)
+ *  =========================
+ *  extraMax 규칙:
+ *  - extraMax < 0 : 무한
+ *  - extraMax = 0 : 추가 bucket 없음
+ *  - extraMax > 0 : 제한 있음
+ */
 const rowMaxConfig: Record<string, { baseMax: number; extraMax: number }> = {
-  'row-shugo': {
-    baseMax: 14,
-    extraMax: 30,
-  },
-  'row-expedition': {
-    baseMax: 21,
-    extraMax: 0, // 무한
-  },
-  'row-ode': {
-    baseMax: 840,
-    extraMax: 2000,
-  },
-  'row-chowol': {
-    baseMax: 14,
-    extraMax: 0, // 무한
-  },
-  'row-daily': {
-    baseMax: 7,
-    extraMax: 30,
-  },
-  'row-awaken': {
-    baseMax: 3,
-    extraMax: 30,
-  },
-  'row-boss': {
-    baseMax: 3,
-    extraMax: 30,
-  },
+  'row-shugo': { baseMax: 14, extraMax: 30 },
+  'row-expedition': { baseMax: 21, extraMax: 0 }, // extra 없음으로 취급
+  'row-ode': { baseMax: 840, extraMax: 2000 },
+  'row-chowol': { baseMax: 14, extraMax: 0 }, // extra 없음으로 취급
+  'row-daily': { baseMax: 7, extraMax: 30 },
+  'row-awaken': { baseMax: 3, extraMax: 30 },
+  'row-boss': { baseMax: 3, extraMax: 30 },
+  'row-dimension': { baseMax: 7, extraMax: 0 },
+  'row-mission': { baseMax: 5, extraMax: 0 },
 }
 
-// 셀 템플릿
-const defaultCell: CounterCell = {
-  baseCurrent: 0,
-  baseMax: 0,
-  extraCurrent: 0,
-  extraMax: 0,
+// 행별 최대치 적용 + 현재값 보정
+function applyMaxConfig(target: HomeworkState) {
+  // 마스터 컨텐츠 기준으로 모두 보정해둠(비활성도 셀 유지)
+  for (const row of rowDefs.filter(r => !r.isSection)) {
+    const cfg = rowMaxConfig[row.id] ?? {
+      baseMax: row.baseMax ?? 0,
+      extraMax: row.extraMax ?? 0,
+    }
+
+    for (const col of target.columns) {
+      const key = cellKey(row.id, col.id)
+      const cell = target.cells[key] ?? (target.cells[key] = { ...defaultCell })
+
+      cell.baseMax = cfg.baseMax
+      cell.extraMax = cfg.extraMax
+
+      if (cell.baseCurrent < 0) cell.baseCurrent = 0
+      if (cell.extraCurrent < 0) cell.extraCurrent = 0
+      if (cell.baseMax > 0 && cell.baseCurrent > cell.baseMax) cell.baseCurrent = cell.baseMax
+      if (cell.extraMax > 0 && cell.extraCurrent > cell.extraMax) cell.extraCurrent = cell.extraMax
+    }
+  }
 }
 
-// 🔹 저장본에서 modes 없을 때 보정
+/** =========================
+ *  Helpers
+ *  ========================= */
+
 function ensureColumnModes(columns: CharacterColumn[]) {
   for (const col of columns as any[]) {
     const base = createDefaultModes()
@@ -147,127 +189,11 @@ function ensureColumnModes(columns: CharacterColumn[]) {
       sanctuary: { ...base.sanctuary, ...(col.modes.sanctuary ?? {}) },
     }
 
-    // lastAction 타입 깨진 저장본 방어
     for (const k of ['conquest', 'transcend', 'sanctuary'] as ColumnModeKey[]) {
       const a = col.modes[k].lastAction
       if (a && typeof a !== 'object') col.modes[k].lastAction = undefined
     }
   }
-}
-
-// 초기 상태 로드 (localStorage → 없으면 기본값)
-function loadInitialState(): HomeworkState {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as HomeworkState
-        if (parsed && parsed.rows && parsed.columns && parsed.cells) {
-          ensureColumnModes(parsed.columns)
-
-          // ✅ 저장본에 membership 없으면 기본 false
-          if (typeof (parsed as any).membership !== 'boolean') {
-            ;(parsed as any).membership = false
-          }
-
-          applyMaxConfig(parsed)
-          return parsed
-        }
-      } catch {
-        // 무시하고 기본값으로
-      }
-    }
-  }
-
-  const cells: Record<string, CounterCell> = {}
-  const base: HomeworkState = {
-    rows: defaultRows,
-    columns: defaultColumns,
-    cells,
-    lastAutoUpdate: new Date().toISOString(),
-    membership: false, // ✅ 추가
-  }
-
-  for (const row of defaultRows) {
-    for (const col of defaultColumns) {
-      const key = cellKey(row.id, col.id)
-      base.cells[key] = { ...defaultCell }
-    }
-  }
-
-  applyMaxConfig(base)
-  return base
-}
-
-const state = ref<HomeworkState>(loadInitialState())
-
-const rows = computed(() => state.value.rows)
-const columns = computed(() => state.value.columns)
-
-// cell key helpers
-function cellKey(rowId: string, colId: string) {
-  return `${rowId}__${colId}`
-}
-
-// 행별 최대치 적용 + 현재값 보정
-function applyMaxConfig(target: HomeworkState) {
-  for (const row of target.rows) {
-    const config = rowMaxConfig[row.id]
-    for (const col of target.columns) {
-      const key = cellKey(row.id, col.id)
-      const cell =
-        target.cells[key] ?? (target.cells[key] = { ...defaultCell })
-
-      if (config) {
-        cell.baseMax = config.baseMax
-        cell.extraMax = config.extraMax
-      }
-
-      if (cell.baseCurrent < 0) cell.baseCurrent = 0
-      if (cell.extraCurrent < 0) cell.extraCurrent = 0
-      if (cell.baseMax > 0 && cell.baseCurrent > cell.baseMax) {
-        cell.baseCurrent = cell.baseMax
-      }
-      if (cell.extraMax > 0 && cell.extraCurrent > cell.extraMax) {
-        cell.extraCurrent = cell.extraMax
-      }
-    }
-  }
-}
-
-function getRowDef(rowId: string) {
-  return rowDefs.find(r => r.id === rowId)
-}
-
-function getCell(rowId: string, colId: string) {
-  const key = `${rowId}__${colId}`
-  let cell = state.value.cells[key]
-  const rowDef = getRowDef(rowId)
-
-  if (!cell) {
-    cell = {
-      baseCurrent: 0,
-      baseMax: rowDef?.baseMax ?? 0,
-      extraCurrent: 0,
-      extraMax: rowDef?.extraMax ?? 0,
-    }
-    state.value.cells[key] = cell
-  } else if (rowDef) {
-    if (typeof rowDef.baseMax === 'number') {
-      cell.baseMax = rowDef.baseMax
-      if (cell.baseCurrent > cell.baseMax) {
-        cell.baseCurrent = cell.baseMax
-      }
-    }
-    if (typeof rowDef.extraMax === 'number') {
-      cell.extraMax = rowDef.extraMax
-      if (cell.extraMax > 0 && cell.extraCurrent > cell.extraMax) {
-        cell.extraCurrent = cell.extraMax
-      }
-    }
-  }
-
-  return cell
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -281,7 +207,7 @@ function isInfiniteExtra(cell: CounterCell) {
 }
 
 function hasExtraBucket(cell: CounterCell) {
-  // extraMax === 0 이면 "추가 자체 없음"으로 취급
+  // extraMax === 0 이면 "추가 자체 없음"
   return cell.extraMax !== 0
 }
 
@@ -307,24 +233,108 @@ function applyDeduct(cell: CounterCell, d: { base: number; extra: number }) {
 }
 
 function applyAdd(cell: CounterCell, d: { base: number; extra: number }) {
-  // base는 max 있으면 clamp
-  if (cell.baseMax > 0) {
-    cell.baseCurrent = Math.min(cell.baseMax, cell.baseCurrent + d.base)
-  } else {
-    cell.baseCurrent = cell.baseCurrent + d.base
-  }
+  if (cell.baseMax > 0) cell.baseCurrent = Math.min(cell.baseMax, cell.baseCurrent + d.base)
+  else cell.baseCurrent += d.base
 
-  // extra
   if (hasExtraBucket(cell)) {
-    if (isInfiniteExtra(cell)) {
-      cell.extraCurrent = cell.extraCurrent + d.extra
-    } else if (cell.extraMax > 0) {
-      cell.extraCurrent = Math.min(cell.extraMax, cell.extraCurrent + d.extra)
-    } else {
-      // extraMax === 0이면 bucket 자체 없음(무시)
-    }
+    if (isInfiniteExtra(cell)) cell.extraCurrent += d.extra
+    else if (cell.extraMax > 0) cell.extraCurrent = Math.min(cell.extraMax, cell.extraCurrent + d.extra)
   }
 }
+
+/** =========================
+ *  Load state (★ 여기서 applyMaxConfig 호출)
+ *  ========================= */
+
+function loadInitialState(): HomeworkState {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as HomeworkState
+        if (parsed && parsed.columns && parsed.cells) {
+          ensureColumnModes(parsed.columns)
+
+          if (typeof (parsed as any).membership !== 'boolean') {
+            ;(parsed as any).membership = false
+          }
+
+          // activeRowIds 보정
+          if (!Array.isArray((parsed as any).activeRowIds)) {
+            ;(parsed as any).activeRowIds = [...defaultActiveRowIds]
+          } else {
+            const allIds = rowDefs.filter(r => !r.isSection).map(r => r.id)
+            const uniq = Array.from(new Set((parsed as any).activeRowIds))
+            ;(parsed as any).activeRowIds = uniq.filter((id: string) => allIds.includes(id))
+          }
+
+          applyMaxConfig(parsed)
+          return parsed
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const base: HomeworkState = {
+    columns: defaultColumns,
+    cells: {},
+    lastAutoUpdate: new Date().toISOString(),
+    membership: false,
+    activeRowIds: [...defaultActiveRowIds],
+  }
+
+  // 기본 셀 생성(마스터 기준으로 모두 만들어두면 안전)
+  for (const row of rowDefs.filter(r => !r.isSection)) {
+    for (const col of base.columns) {
+      base.cells[cellKey(row.id, col.id)] = { ...defaultCell }
+    }
+  }
+
+  applyMaxConfig(base)
+  return base
+}
+
+const state = ref<HomeworkState>(loadInitialState())
+const columns = computed(() => state.value.columns)
+
+/** =========================
+ *  Cell getter
+ *  ========================= */
+
+function getCell(rowId: string, colId: string) {
+  const key = cellKey(rowId, colId)
+  let cell = state.value.cells[key]
+  const def = getRowDefById(rowId)
+
+  if (!cell) {
+    const cfg = rowMaxConfig[rowId] ?? { baseMax: def?.baseMax ?? 0, extraMax: def?.extraMax ?? 0 }
+    cell = {
+      baseCurrent: 0,
+      baseMax: cfg.baseMax,
+      extraCurrent: 0,
+      extraMax: cfg.extraMax,
+    }
+    state.value.cells[key] = cell
+  }
+
+  // max 동기화
+  const cfg = rowMaxConfig[rowId] ?? { baseMax: def?.baseMax ?? 0, extraMax: def?.extraMax ?? 0 }
+  cell.baseMax = cfg.baseMax
+  cell.extraMax = cfg.extraMax
+
+  if (cell.baseCurrent < 0) cell.baseCurrent = 0
+  if (cell.extraCurrent < 0) cell.extraCurrent = 0
+  if (cell.baseMax > 0 && cell.baseCurrent > cell.baseMax) cell.baseCurrent = cell.baseMax
+  if (cell.extraMax > 0 && cell.extraCurrent > cell.extraMax) cell.extraCurrent = cell.extraMax
+
+  return cell
+}
+
+/** =========================
+ *  Mode actions (정복/초월/성역)
+ *  ========================= */
 
 function getCol(colId: string) {
   return state.value.columns.find(c => c.id === colId)
@@ -352,7 +362,6 @@ function doConquest(colId: string) {
     return
   }
 
-  // 둘 다 가능할 때만 실제 차감
   applyDeduct(ticketCell, ticketDeduct)
   applyDeduct(odeCell, odeDeduct)
 
@@ -399,8 +408,7 @@ function doSanctuary(colId: string) {
   const col = getCol(colId)
   if (!col) return
 
-  const odeCost = 40 // 성역은 요구사항상 항상 40
-
+  const odeCost = 40
   const odeCell = getCell('row-ode', colId)
   const odeDeduct = planDeduct(odeCell, odeCost)
 
@@ -424,13 +432,11 @@ function undoMode(colId: string, mode: ColumnModeKey) {
   const action = col.modes[mode].lastAction
   if (!action) return
 
-  // ticket 복원
   if (action.ticket) {
     const cell = getCell(action.ticket.rowId, colId)
     applyAdd(cell, { base: action.ticket.base, extra: action.ticket.extra })
   }
 
-  // ode 복원
   if (action.ode) {
     const cell = getCell(action.ode.rowId, colId)
     applyAdd(cell, { base: action.ode.base, extra: action.ode.extra })
@@ -439,35 +445,10 @@ function undoMode(colId: string, mode: ColumnModeKey) {
   col.modes[mode].lastAction = undefined
 }
 
-// 버튼 동작들
-function changeBase(rowId: string, colId: string, delta: number) {
-  const cell = getCell(rowId, colId)
-  const next = cell.baseCurrent + delta
-  cell.baseCurrent = clamp(next, 0, cell.baseMax)
-}
+/** =========================
+ *  Column add/remove + drag
+ *  ========================= */
 
-function changeExtra(rowId: string, colId: string, delta: number) {
-  const cell = getCell(rowId, colId)
-  const next = cell.extraCurrent + delta
-  cell.extraCurrent = clamp(next, 0, cell.extraMax)
-}
-
-// 행 추가
-function addRow() {
-  const name = window.prompt('추가할 숙제 이름을 입력하세요.')
-  if (!name) return
-  const trimmed = name.trim()
-  if (!trimmed) return
-
-  const id = `row-${Date.now()}`
-  state.value.rows.push({ id, name: trimmed })
-
-  for (const col of state.value.columns) {
-    getCell(id, col.id)
-  }
-}
-
-// 열(캐릭터) 추가용 다이얼로그
 const addColumnDialog = ref(false)
 const newCharacterName = ref('')
 
@@ -476,7 +457,6 @@ function openAddColumn() {
   addColumnDialog.value = true
 }
 
-// 열(캐릭터) 추가
 function confirmAddColumn() {
   const name = newCharacterName.value.trim()
   if (!name) return
@@ -484,22 +464,20 @@ function confirmAddColumn() {
   const id = `char-${Date.now()}`
   state.value.columns.push({ id, name, modes: createDefaultModes() })
 
-  for (const row of state.value.rows) {
+  // 마스터 기준으로 모든 컨텐츠에 셀 생성
+  for (const row of rowDefs.filter(r => !r.isSection)) {
     getCell(row.id, id)
   }
 
   addColumnDialog.value = false
 }
 
-// 열(캐릭터) 삭제
 function removeColumn(colId: string) {
-  // ✅ 옵션: 마지막 1개는 삭제 못하게
   if (state.value.columns.length <= 1) {
     window.alert('캐릭터는 최소 1개는 남아야 합니다.')
     return
   }
 
-  // ✅ 옵션: 삭제 확인
   const col = state.value.columns.find(c => c.id === colId)
   const name = col?.name?.trim() || '캐릭터'
   if (!window.confirm(`"${name}" 칸을 삭제할까요?`)) return
@@ -507,44 +485,16 @@ function removeColumn(colId: string) {
   const idx = state.value.columns.findIndex(c => c.id === colId)
   if (idx === -1) return
 
-  // 1) columns에서 제거
   state.value.columns.splice(idx, 1)
 
-  // 2) cells에서 해당 colId에 해당하는 키들 제거
-  for (const row of state.value.rows) {
-    const key = cellKey(row.id, colId)
-    delete state.value.cells[key]
+  // 모든 row에 대해 해당 colId 셀 삭제
+  for (const row of rowDefs.filter(r => !r.isSection)) {
+    delete state.value.cells[cellKey(row.id, colId)]
   }
 
-  // 3) 드래그 상태 정리
   if (draggingColumnId.value === colId) draggingColumnId.value = null
   if (dropPreview.value?.targetId === colId) dropPreview.value = null
 }
-
-// localStorage 저장
-watch(
-  state,
-  (val) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
-    }
-  },
-  { deep: true }
-)
-
-// 자동 증가용 타이머
-let timerId: number | undefined
-
-onMounted(() => {
-  handleAutoIncrease()
-  timerId = window.setInterval(handleAutoIncrease, 60_000)
-})
-
-onBeforeUnmount(() => {
-  if (timerId) {
-    window.clearInterval(timerId)
-  }
-})
 
 const draggingColumnId = ref<string | null>(null)
 const dropPreview = ref<{ targetId: string; position: 'before' | 'after' } | null>(null)
@@ -552,11 +502,8 @@ const dropPreview = ref<{ targetId: string; position: 'before' | 'after' } | nul
 function onColumnDragStart(colId: string, event: DragEvent) {
   draggingColumnId.value = colId
   dropPreview.value = null
-
   event.dataTransfer?.setData('text/plain', colId)
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-  }
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
 function onColumnDragOver(colId: string, event: DragEvent) {
@@ -576,10 +523,7 @@ function onColumnDragOver(colId: string, event: DragEvent) {
   }
 
   dropPreview.value = { targetId: colId, position }
-
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'move'
-  }
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
 
 function onColumnDrop(colId: string, event: DragEvent) {
@@ -593,24 +537,17 @@ function onColumnDrop(colId: string, event: DragEvent) {
   if (!fromId) return
 
   const cols = state.value.columns
-  const fromIndex = cols.findIndex((c) => c.id === fromId)
-  let toIndex = cols.findIndex((c) => c.id === colId)
+  const fromIndex = cols.findIndex(c => c.id === fromId)
+  let toIndex = cols.findIndex(c => c.id === colId)
 
   if (fromIndex === -1 || toIndex === -1) return
   if (fromIndex === toIndex && !preview) return
 
-  if (preview && preview.targetId === colId) {
-    if (preview.position === 'after') {
-      toIndex += 1
-    }
-  } else {
-    toIndex += 1
-  }
+  if (preview?.targetId === colId && preview.position === 'after') toIndex += 1
+  else toIndex += 1
 
   const [moved] = cols.splice(fromIndex, 1)
-  if (fromIndex < toIndex) {
-    toIndex -= 1
-  }
+  if (fromIndex < toIndex) toIndex -= 1
   cols.splice(toIndex, 0, moved)
 }
 
@@ -618,6 +555,153 @@ function onColumnDragEnd() {
   draggingColumnId.value = null
   dropPreview.value = null
 }
+
+/** =========================
+ *  Content add/remove + drag
+ *  ========================= */
+
+const allContentDefs = computed(() => rowDefs.filter(r => !r.isSection))
+const allContentIdSet = computed(() => new Set(allContentDefs.value.map(r => r.id)))
+
+const inactiveContentDefs = computed(() => {
+  const active = new Set(state.value.activeRowIds)
+  return allContentDefs.value.filter(r => !active.has(r.id))
+})
+
+const displayRowDefs = computed<RowDef[]>(() => {
+  const activeOrder = state.value.activeRowIds.filter(id => allContentIdSet.value.has(id))
+  const out: RowDef[] = []
+  const sections: SectionKey[] = ['ticket', 'daily', 'weekly']
+
+  for (const sec of sections) {
+    const secDef = rowDefs.find(r => r.isSection && r.sectionKey === sec)
+    if (secDef) out.push(secDef)
+
+    for (const id of activeOrder) {
+      const def = getRowDefById(id)
+      if (def && !def.isSection && def.sectionKey === sec) out.push(def)
+    }
+  }
+
+  return out
+})
+
+// 컨텐츠 추가 다이얼로그
+const addContentDialog = ref(false)
+const selectedContentId = ref<string | null>(null)
+
+function openAddContent() {
+  selectedContentId.value = null
+  addContentDialog.value = true
+}
+
+function ensureCellsForRow(rowId: string) {
+  for (const col of state.value.columns) {
+    getCell(rowId, col.id)
+  }
+}
+
+function insertActiveRow(rowId: string) {
+  const def = getRowDefById(rowId)
+  if (!def || def.isSection || !def.sectionKey) return
+
+  const ids = state.value.activeRowIds
+  if (ids.includes(rowId)) return
+
+  // 같은 섹션 마지막 뒤로 넣기
+  let insertAt = -1
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const d = getRowDefById(ids[i])
+    if (d && d.sectionKey === def.sectionKey) {
+      insertAt = i + 1
+      break
+    }
+  }
+  if (insertAt < 0) insertAt = ids.length
+
+  ids.splice(insertAt, 0, rowId)
+  ensureCellsForRow(rowId)
+}
+
+function confirmAddContent() {
+  if (!selectedContentId.value) return
+  insertActiveRow(selectedContentId.value)
+  addContentDialog.value = false
+}
+
+function removeContentRow(rowId: string) {
+  const def = getRowDefById(rowId)
+  const name = def?.label ?? '컨텐츠'
+  if (!window.confirm(`"${name}" 컨텐츠를 목록에서 제거할까요?`)) return
+
+  // cells는 삭제하지 않음(값 유지)
+  state.value.activeRowIds = state.value.activeRowIds.filter(id => id !== rowId)
+
+  if (draggingRowId.value === rowId) draggingRowId.value = null
+  if (dropPreviewRow.value?.targetId === rowId) dropPreviewRow.value = null
+}
+
+const draggingRowId = ref<string | null>(null)
+const dropPreviewRow = ref<{ targetId: string; position: 'before' | 'after' } | null>(null)
+
+function onRowDragStart(rowId: string, event: DragEvent) {
+  draggingRowId.value = rowId
+  dropPreviewRow.value = null
+  event.dataTransfer?.setData('text/plain', rowId)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function onRowDragOver(rowId: string, event: DragEvent) {
+  event.preventDefault()
+  if (!draggingRowId.value || draggingRowId.value === rowId) {
+    dropPreviewRow.value = null
+    return
+  }
+
+  const target = event.currentTarget as HTMLElement | null
+  let position: 'before' | 'after' = 'after'
+
+  if (target) {
+    const rect = target.getBoundingClientRect()
+    const y = event.clientY - rect.top
+    position = y < rect.height / 2 ? 'before' : 'after'
+  }
+
+  dropPreviewRow.value = { targetId: rowId, position }
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function onRowDrop(rowId: string, event: DragEvent) {
+  event.preventDefault()
+
+  const fromId = draggingRowId.value
+  const preview = dropPreviewRow.value
+  draggingRowId.value = null
+  dropPreviewRow.value = null
+
+  if (!fromId) return
+
+  const ids = state.value.activeRowIds
+  const fromIndex = ids.findIndex(id => id === fromId)
+  let toIndex = ids.findIndex(id => id === rowId)
+  if (fromIndex === -1 || toIndex === -1) return
+  if (fromIndex === toIndex) return
+
+  if (preview?.targetId === rowId && preview.position === 'after') toIndex += 1
+
+  const [moved] = ids.splice(fromIndex, 1)
+  if (fromIndex < toIndex) toIndex -= 1
+  ids.splice(toIndex, 0, moved)
+}
+
+function onRowDragEnd() {
+  draggingRowId.value = null
+  dropPreviewRow.value = null
+}
+
+/** =========================
+ *  Auto increase
+ *  ========================= */
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -630,23 +714,14 @@ function makeAnchorAtHour(hour: number) {
 }
 
 const ANCHOR_5 = makeAnchorAtHour(5)
-// 테스트용
-const ANCHOR_2 = makeAnchorAtHour(2)
 
 const ANCHOR_WED_5 = (() => {
   const d = makeAnchorAtHour(5)
-  while (d.getDay() !== 3) {
-    d.setDate(d.getDate() + 1)
-  }
+  while (d.getDay() !== 3) d.setDate(d.getDate() + 1)
   return d
 })()
 
-function countPeriodicEvents(
-  last: Date,
-  now: Date,
-  anchor: Date,
-  periodMs: number
-): number {
+function countPeriodicEvents(last: Date, now: Date, anchor: Date, periodMs: number): number {
   const lastMs = last.getTime()
   const nowMs = now.getTime()
   if (nowMs <= lastMs) return 0
@@ -654,7 +729,6 @@ function countPeriodicEvents(
   const baseMs = anchor.getTime()
   const fromIndex = Math.floor((lastMs - baseMs) / periodMs)
   const toIndex = Math.floor((nowMs - baseMs) / periodMs)
-
   return Math.max(0, toIndex - fromIndex)
 }
 
@@ -663,11 +737,8 @@ function addBaseToRow(rowId: string, amount: number) {
   for (const col of state.value.columns) {
     const cell = getCell(rowId, col.id)
     const max = cell.baseMax
-    if (max > 0) {
-      cell.baseCurrent = Math.min(max, cell.baseCurrent + amount)
-    } else {
-      cell.baseCurrent += amount
-    }
+    if (max > 0) cell.baseCurrent = Math.min(max, cell.baseCurrent + amount)
+    else cell.baseCurrent += amount
   }
 }
 
@@ -675,9 +746,7 @@ function setBaseToMax(rowId: string) {
   for (const col of state.value.columns) {
     const cell = getCell(rowId, col.id)
     const max = cell.baseMax
-    if (max > 0) {
-      cell.baseCurrent = max
-    }
+    if (max > 0) cell.baseCurrent = max
   }
 }
 
@@ -685,129 +754,69 @@ function handleAutoIncrease() {
   const now = new Date()
 
   let last = new Date(state.value.lastAutoUpdate || now.toISOString())
-  if (isNaN(last.getTime())) {
-    last = now
-  }
+  if (isNaN(last.getTime())) last = now
 
   if (now.getTime() <= last.getTime()) {
     state.value.lastAutoUpdate = now.toISOString()
     return
   }
 
-  const expeditionEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    8 * HOUR_MS
-  )
-  if (expeditionEvents > 0) {
-    addBaseToRow('row-expedition', expeditionEvents * 1)
-  }
+  const expeditionEvents = countPeriodicEvents(last, now, ANCHOR_5, 8 * HOUR_MS)
+  if (expeditionEvents > 0) addBaseToRow('row-expedition', expeditionEvents * 1)
 
-  const odeEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    3 * HOUR_MS
-  )
-  if (odeEvents > 0) {
-    addBaseToRow('row-ode', odeEvents * 15)
-  }
+  const odeEvents = countPeriodicEvents(last, now, ANCHOR_5, 3 * HOUR_MS)
+  if (odeEvents > 0) addBaseToRow('row-ode', odeEvents * 15)
 
-  const chowolEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    12 * HOUR_MS
-  )
-  if (chowolEvents > 0) {
-    addBaseToRow('row-chowol', chowolEvents * 1)
-  }
+  const chowolEvents = countPeriodicEvents(last, now, ANCHOR_5, 12 * HOUR_MS)
+  if (chowolEvents > 0) addBaseToRow('row-chowol', chowolEvents * 1)
 
-  const shugoEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    DAY_MS
-  )
+  const shugoEvents = countPeriodicEvents(last, now, ANCHOR_5, DAY_MS)
   if (shugoEvents > 0) {
     const perDay = state.value.membership ? 2 : 1
     addBaseToRow('row-shugo', shugoEvents * perDay)
   }
 
-  const weeklyEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_WED_5,
-    WEEK_MS
-  )
+  const weeklyEvents = countPeriodicEvents(last, now, ANCHOR_WED_5, WEEK_MS)
   if (weeklyEvents > 0) {
     setBaseToMax('row-daily')
     setBaseToMax('row-awaken')
     setBaseToMax('row-boss')
   }
 
-  // 차원침공 : 매일 5시, +1
-  const dimensionEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    DAY_MS
-  )
-  if (dimensionEvents > 0) {
-    addBaseToRow('row-dimension', dimensionEvents * 1)
-  }
+  const dimensionEvents = countPeriodicEvents(last, now, ANCHOR_5, DAY_MS)
+  if (dimensionEvents > 0) addBaseToRow('row-dimension', dimensionEvents * 1)
 
-  // 사명퀘스트 : 매일 5시, baseMax(5) 까지
-  const missionEvents = countPeriodicEvents(
-    last,
-    now,
-    ANCHOR_5,
-    DAY_MS
-  )
-  if (missionEvents > 0) {
-    setBaseToMax('row-mission')
-  }
+  const missionEvents = countPeriodicEvents(last, now, ANCHOR_5, DAY_MS)
+  if (missionEvents > 0) setBaseToMax('row-mission')
 
   state.value.lastAutoUpdate = now.toISOString()
-
-
 }
 
+/** =========================
+ *  Save + Timer
+ *  ========================= */
 
-// 버튼 동작 추가
-interface ColumnDeductLog {
-  rowId: string
-  base: number
-  extra: number
-}
+watch(
+  state,
+  (val) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
+    }
+  },
+  { deep: true }
+)
 
-interface ColumnModeAction {
-  ticket?: ColumnDeductLog
-  ode?: ColumnDeductLog
-  at: string
-}
+let timerId: number | undefined
 
-interface ColumnModeState {
-  x2: boolean
-  lastAction?: ColumnModeAction
-}
+onMounted(() => {
+  applyMaxConfig(state.value)
+  handleAutoIncrease()
+  timerId = window.setInterval(handleAutoIncrease, 60_000)
+})
 
-
-
-
-
-
-// watch(
-//   () => state.value.columns,
-//   (newCols, oldCols) => {
-//     console.log('📌 columns changed')
-//     console.log('old:', oldCols)
-//     console.log('new:', newCols)
-//   },
-//   { deep: true }
-// )
-
+onBeforeUnmount(() => {
+  if (timerId) window.clearInterval(timerId)
+})
 </script>
 
 <template>
@@ -822,14 +831,14 @@ interface ColumnModeState {
         <div class="text-subtitle-1 font-weight-medium">
           일일 / 주간 숙제 관리
         </div>
+
         <div class="d-flex hw-actions">
-          <v-btn
-            size="small"
-            variant="tonal"
-            color="primary"
-            @click="openAddColumn"
-          >
+          <v-btn size="small" variant="tonal" color="primary" @click="openAddColumn">
             + 캐릭터 추가
+          </v-btn>
+
+          <v-btn size="small" variant="tonal" color="secondary" @click="openAddContent">
+            + 컨텐츠 추가
           </v-btn>
         </div>
       </v-card-title>
@@ -867,9 +876,8 @@ interface ColumnModeState {
                     >
                       <span class="hw-col-dots">⋯</span>
                     </div>
+
                     <div class="hw-col-header-content">
-                      
-                      <!-- 캐릭터명 + 삭제버튼 한 줄 -->
                       <div class="hw-name-row">
                         <v-text-field
                           v-model="col.name"
@@ -891,16 +899,12 @@ interface ColumnModeState {
                         </v-btn>
                       </div>
 
-                      <!-- 🔹 정복 / 초월 / 성역 모드 줄 -->
                       <div class="hw-mode-row">
                         <!-- 정복 -->
                         <div class="hw-mode-card" @click="doConquest(col.id)">
-                          <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">정복</span>
                           </div>
-
-                          <!-- 오른쪽: X2 + undo -->
                           <div class="hw-mode-right">
                             <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
                               <input type="checkbox" v-model="col.modes.conquest.x2" />
@@ -922,12 +926,9 @@ interface ColumnModeState {
 
                         <!-- 초월 -->
                         <div class="hw-mode-card" @click="doTranscend(col.id)">
-                          <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">초월</span>
                           </div>
-
-                          <!-- 오른쪽: X2 + undo -->
                           <div class="hw-mode-right">
                             <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
                               <input type="checkbox" v-model="col.modes.transcend.x2" />
@@ -949,19 +950,10 @@ interface ColumnModeState {
 
                         <!-- 성역 -->
                         <div class="hw-mode-card" @click="doSanctuary(col.id)">
-                          <!-- 왼쪽: 라벨 -->
                           <div class="hw-mode-left">
                             <span class="hw-mode-label">성역</span>
                           </div>
-
-                          <!-- 오른쪽: X2 + undo -->
                           <div class="hw-mode-right hw-sanctuary-check">
-                            <!-- <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
-                              <input type="checkbox" v-model="col.modes.sanctuary.x2" />
-                              <span class="hw-x2-box" aria-hidden="true"></span>
-                              <span class="hw-x2-text">x2</span>
-                            </label> -->
-
                             <v-btn
                               class="hw-undo-btn"
                               icon
@@ -973,7 +965,6 @@ interface ColumnModeState {
                             </v-btn>
                           </div>
                         </div>
-
                       </div>
                     </div>
                   </div>
@@ -982,35 +973,60 @@ interface ColumnModeState {
             </thead>
 
             <tbody>
-              <template v-for="row in rowDefs" :key="row.id">
-                <!-- 섹션 헤더 -->
+              <template v-for="row in displayRowDefs" :key="row.id">
                 <tr v-if="row.isSection" class="hw-section-row">
-                  <td
-                    class="hw-section-cell"
-                    :colspan="columns.length + 1"
-                  >
+                  <td class="hw-section-cell" :colspan="columns.length + 1">
                     {{ row.label }}
                   </td>
                 </tr>
 
-                <!-- 실제 컨텐츠 행 -->
-                <tr v-else class="hw-row">
+                <tr
+                  v-else
+                  class="hw-row"
+                  @dragover="(e) => onRowDragOver(row.id, e)"
+                  @drop="(e) => onRowDrop(row.id, e)"
+                  @dragend="onRowDragEnd"
+                  :class="{
+                    'hw-row-drop-before':
+                      dropPreviewRow && dropPreviewRow.targetId === row.id && dropPreviewRow.position === 'before',
+                    'hw-row-drop-after':
+                      dropPreviewRow && dropPreviewRow.targetId === row.id && dropPreviewRow.position === 'after',
+                  }"
+                >
                   <td class="hw-first-col">
                     <div class="hw-row-title">
-                      <span>{{ row.label }}</span>
+                      <div class="hw-row-left">
+                        <div
+                          class="hw-row-handle"
+                          draggable="true"
+                          @dragstart="(e) => onRowDragStart(row.id, e)"
+                          title="드래그로 순서 변경"
+                        >
+                          ⋯
+                        </div>
+                        <span>{{ row.label }}</span>
+                      </div>
 
-                      <!-- ✅ 슈고일 때만 멤버십 체크박스 -->
-                      <label v-if="row.id === 'row-shugo'" class="hw-membership">
-                        <input type="checkbox" v-model="state.membership" />
-                        <span class="hw-membership-text">멤버십</span>
-                      </label>
+                      <div class="hw-row-right">
+                        <label v-if="row.id === 'row-shugo'" class="hw-membership">
+                          <input type="checkbox" v-model="state.membership" />
+                          <span class="hw-membership-text">멤버십</span>
+                        </label>
+
+                        <v-btn
+                          class="hw-row-remove"
+                          size="x-small"
+                          variant="flat"
+                          @click.stop="removeContentRow(row.id)"
+                          title="컨텐츠 제거"
+                        >
+                          -
+                        </v-btn>
+                      </div>
                     </div>
                   </td>
 
-                  <td
-                    v-for="col in columns"
-                    :key="col.id"
-                  >
+                  <td v-for="col in columns" :key="col.id">
                     <HomeworkCell :cell="getCell(row.id, col.id)" />
                   </td>
                 </tr>
@@ -1026,18 +1042,38 @@ interface ColumnModeState {
       <v-card>
         <v-card-title>캐릭터 추가</v-card-title>
         <v-card-text>
-          <v-text-field
-            v-model="newCharacterName"
-            label="캐릭터명"
-            autofocus
-          />
+          <v-text-field v-model="newCharacterName" label="캐릭터명" autofocus />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="addColumnDialog = false">
-            취소
-          </v-btn>
-          <v-btn color="primary" @click="confirmAddColumn">
+          <v-btn variant="text" @click="addColumnDialog = false">취소</v-btn>
+          <v-btn color="primary" @click="confirmAddColumn">확인</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 컨텐츠 추가 다이얼로그 -->
+    <v-dialog v-model="addContentDialog" max-width="420">
+      <v-card>
+        <v-card-title>컨텐츠 추가</v-card-title>
+        <v-card-text>
+          <v-select
+            v-model="selectedContentId"
+            :items="inactiveContentDefs"
+            item-title="label"
+            item-value="id"
+            label="추가할 컨텐츠 선택"
+            placeholder="비활성 컨텐츠만 표시됩니다"
+            :disabled="inactiveContentDefs.length === 0"
+          />
+          <div v-if="inactiveContentDefs.length === 0" class="text-caption opacity-70">
+            현재 추가할 수 있는 컨텐츠가 없습니다.
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="addContentDialog = false">취소</v-btn>
+          <v-btn color="primary" :disabled="!selectedContentId" @click="confirmAddContent">
             확인
           </v-btn>
         </v-card-actions>
@@ -1081,7 +1117,7 @@ interface ColumnModeState {
   flex-direction: column;
 }
 
-/* 드래그 핸들 바 */
+/* 드래그 핸들 바 (캐릭터) */
 .hw-col-handle-bar {
   width: 100%;
   height: 22px;
@@ -1096,17 +1132,14 @@ interface ColumnModeState {
   opacity: 0.9;
   box-sizing: border-box;
 }
-
 .hw-col-handle-bar:hover {
   background-color: rgba(255, 255, 255, 0.25);
   opacity: 1;
 }
-
 .hw-col-handle-bar:active {
   cursor: grabbing;
   background-color: rgba(255, 255, 255, 0.32);
 }
-
 .hw-col-dots {
   font-size: 16px;
   letter-spacing: 2px;
@@ -1122,11 +1155,9 @@ interface ColumnModeState {
   border-radius: 999px;
   background-color: rgb(144, 202, 249);
 }
-
 .hw-col-header.hw-drop-before::before {
   left: -2px;
 }
-
 .hw-col-header.hw-drop-after::after {
   right: -2px;
 }
@@ -1136,16 +1167,10 @@ interface ColumnModeState {
   font-size: 13px;
 }
 
-.hw-row-input :deep(input) {
-  font-weight: 600;
-  font-size: 13px;
-}
-
 .opacity-70 {
   opacity: 0.7;
 }
 
-/* actions gap */
 .hw-actions > * + * {
   margin-left: 8px;
 }
@@ -1163,52 +1188,34 @@ interface ColumnModeState {
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* 🔹 정복 / 초월 / 성역 UI */
-
-
-.hw-mode-top {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.hw-mode-x2-wrap {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* Vuetify 체크박스 여백 줄이기 */
-.hw-mode-checkbox :deep(.v-selection-control) {
-  padding: 0;
-  margin: 0;
-}
-.hw-mode-checkbox :deep(.v-icon) {
-  font-size: 16px;
-}
-
-.hw-mode-x2-label {
-  font-size: 11px;
-  color: #7fb5ff;
-}
-
-.hw-mode-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 2px;
-}
-
-.hw-mode-undo {
-  min-width: 0;
-  padding: 0;
-  font-size: 14px;
-  line-height: 1;
-  color: #9fd3ff;
-}
-
 /* ✅ 드래그바 아래 내용만 좌우 여백 주기 */
 .hw-col-header-content {
-  padding: 0 10px 8px;   /* 여기 값이 아래 td랑 폭 느낌 맞춰줌 */
+  padding: 0 10px 8px;
+}
+
+/* 캐릭터명 입력줄 + 삭제버튼 */
+.hw-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hw-name-row .hw-header-input {
+  flex: 1;
+  min-width: 0;
+}
+.hw-col-remove-inline {
+  min-width: 26px !important;
+  width: 26px !important;
+  height: 26px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  background: #e53935 !important;
+  color: #fff !important;
+  font-weight: 900;
+  line-height: 1;
+}
+.hw-col-remove-inline:hover {
+  filter: brightness(1.05);
 }
 
 /* 3개 카드 한 줄 */
@@ -1217,45 +1224,34 @@ interface ColumnModeState {
   gap: 8px;
   margin-top: 6px;
 }
-
-/* 카드 자체: 좌/우 분할 */
-
 .hw-mode-card {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: 1fr 64px; /* 오른쪽 폭 고정(체크+undo) */
+  grid-template-columns: 1fr 64px;
   align-items: stretch;
-
   border-radius: 12px;
   background-color: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.10);
   overflow: hidden;
 }
-
-/* 왼쪽 라벨 영역 */
 .hw-mode-left {
   display: flex;
   align-items: center;
   padding: 10px 10px;
 }
-
 .hw-mode-label {
   font-size: 20px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 0.02em;
 }
-
-/* 오른쪽 영역: 구분선 + 위아래 배치 */
 .hw-mode-right {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 13px 13px;
 }
-
-/* X2 체크 영역 */
 .hw-x2 {
   display: flex;
   align-items: center;
@@ -1265,15 +1261,11 @@ interface ColumnModeState {
   user-select: none;
   margin-bottom: 10px;
 }
-
-/* 실제 input 숨기고 커스텀 박스 */
 .hw-x2 input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
-
-/* 체크박스 테두리(구분 확실히) */
 .hw-x2-box {
   width: 16px;
   height: 16px;
@@ -1283,15 +1275,11 @@ interface ColumnModeState {
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
   display: inline-block;
 }
-
-/* 체크된 상태 표시 */
 .hw-x2 input:checked + .hw-x2-box {
   border-color: rgba(144, 202, 249, 0.95);
   background: rgba(144, 202, 249, 0.25);
   box-shadow: inset 0 0 0 2px rgba(144, 202, 249, 0.35);
 }
-
-/* x2 텍스트 */
 .hw-x2-text {
   font-size: 12px;
   font-weight: 800;
@@ -1299,72 +1287,85 @@ interface ColumnModeState {
   color: rgba(255, 255, 255, 0.88);
   text-transform: uppercase;
 }
-
-/* 되돌리기 원형 버튼 - “버튼처럼” 보이게 */
 .hw-undo-btn {
   align-self: flex-end;
   width: 32px;
   height: 32px;
   border-radius: 999px !important;
   font-size: 18px;
-
   background: rgba(255, 255, 255, 0.12) !important;
   border: 1px solid rgba(255, 255, 255, 0.16) !important;
   color: white !important;
-
   padding-top: 3px;
 }
-
 .hw-undo-btn:hover {
   background: rgba(255, 255, 255, 0.18) !important;
 }
-
 .hw-sanctuary-check {
-  margin:auto;
+  margin: auto;
 }
 
-/* 캐릭터명 입력줄 + 삭제버튼 */
-.hw-name-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* 입력창이 줄의 대부분 차지 */
-.hw-name-row .hw-header-input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* 🔴 캐릭터 삭제 버튼 (입력창 옆) */
-.hw-col-remove-inline {
-  min-width: 26px !important;
-  width: 26px !important;
-  height: 26px !important;
-
-  padding: 0 !important;
-  border-radius: 8px !important;
-
-  background: #e53935 !important;
-  color: #fff !important;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.hw-col-remove-inline:hover {
-  filter: brightness(1.05);
-}
-
-
-/* 행 타이틀: 왼쪽 라벨 + 오른쪽 옵션 */
+/* 행 타이틀 */
 .hw-row-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
+.hw-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hw-row-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 
-/* 슈고 멤버십 체크 */
+/* 행 드래그 핸들 */
+.hw-row-handle {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: grab;
+  user-select: none;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0.9;
+}
+.hw-row-handle:active {
+  cursor: grabbing;
+}
+
+/* 컨텐츠 제거 버튼 */
+.hw-row-remove {
+  min-width: 26px !important;
+  width: 26px !important;
+  height: 26px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  background: rgba(229, 57, 53, 0.95) !important;
+  color: #fff !important;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* 드롭 프리뷰(위/아래 라인) */
+.hw-row.hw-row-drop-before td {
+  box-shadow: inset 0 3px 0 0 rgb(144, 202, 249);
+}
+.hw-row.hw-row-drop-after td {
+  box-shadow: inset 0 -3px 0 0 rgb(144, 202, 249);
+}
+
+/* 슈고 멤버십 */
 .hw-membership {
   display: inline-flex;
   align-items: center;
@@ -1374,13 +1375,10 @@ interface ColumnModeState {
   white-space: nowrap;
   opacity: 0.9;
 }
-
-/* 체크박스 크기 살짝 키우기 */
 .hw-membership input[type="checkbox"] {
   width: 14px;
   height: 14px;
 }
-
 .hw-membership-text {
   font-size: 12px;
   font-weight: 700;
