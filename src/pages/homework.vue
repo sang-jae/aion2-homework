@@ -19,7 +19,6 @@ type RowDef = {
 }
 
 const rowDefs: RowDef[] = [
-  // 섹션: 티켓
   { id: 'section-ticket', label: '티켓', isSection: true, sectionKey: 'ticket' },
 
   { id: 'row-ode', label: '오드', baseMax: 840, extraMax: 2000, sectionKey: 'ticket' },
@@ -28,14 +27,10 @@ const rowDefs: RowDef[] = [
   { id: 'row-shugo', label: '슈고', baseMax: 14, extraMax: 30, sectionKey: 'ticket' },
   { id: 'row-dimension', label: '차원침공', baseMax: 7, extraMax: 0, sectionKey: 'ticket' },
 
-  // 섹션: 일일
   { id: 'section-daily', label: '일일', isSection: true, sectionKey: 'daily' },
-
   { id: 'row-mission', label: '사명퀘스트', baseMax: 5, extraMax: 0, sectionKey: 'daily' },
 
-  // 섹션: 주간
   { id: 'section-weekly', label: '주간', isSection: true, sectionKey: 'weekly' },
-
   { id: 'row-daily', label: '일일던전', baseMax: 7, extraMax: 30, sectionKey: 'weekly' },
   { id: 'row-awaken', label: '각성전', baseMax: 3, extraMax: 30, sectionKey: 'weekly' },
   { id: 'row-boss', label: '토벌전', baseMax: 3, extraMax: 30, sectionKey: 'weekly' },
@@ -64,9 +59,15 @@ interface ColumnDeductLog {
   extra: number
 }
 
+interface ColumnMNLog {
+  mDelta?: number
+  nDelta?: number
+}
+
 interface ColumnModeAction {
   ticket?: ColumnDeductLog
   ode?: ColumnDeductLog
+  mn?: ColumnMNLog
   at: string
 }
 
@@ -75,10 +76,25 @@ interface ColumnModeState {
   lastAction?: ColumnModeAction
 }
 
+interface BossNoRewardState {
+  lastAction?: {
+    mn: ColumnMNLog
+    at: string
+  }
+}
+
 interface CharacterColumn {
   id: string
   name: string
   modes: Record<ColumnModeKey, ColumnModeState>
+
+  conquestM: number // max 35
+  transcendN: number // max 28
+
+  bossNoReward: {
+    conquest: BossNoRewardState
+    transcend: BossNoRewardState
+  }
 }
 
 interface HomeworkState {
@@ -86,7 +102,7 @@ interface HomeworkState {
   cells: Record<string, CounterCell>
   lastAutoUpdate: string
   membership: boolean
-  activeRowIds: string[] // ✅ 활성 컨텐츠 + 순서
+  activeRowIds: string[]
 }
 
 /** =========================
@@ -96,8 +112,30 @@ interface HomeworkState {
 const STORAGE_KEY_V2 = 'aion2-homework-state-v2'
 const STORAGE_KEY_V1 = 'aion2-homework-state-v1'
 
+function createDefaultModes(): Record<ColumnModeKey, ColumnModeState> {
+  return {
+    conquest: { x2: false },
+    transcend: { x2: false },
+    sanctuary: { x2: false },
+  }
+}
+
+function createDefaultBossNoReward() {
+  return {
+    conquest: {},
+    transcend: {},
+  } as CharacterColumn['bossNoReward']
+}
+
 const defaultColumns: CharacterColumn[] = [
-  { id: 'char-1', name: '캐릭터명1', modes: createDefaultModes() },
+  {
+    id: 'char-1',
+    name: '캐릭터명1',
+    modes: createDefaultModes(),
+    conquestM: 35,
+    transcendN: 28,
+    bossNoReward: createDefaultBossNoReward(),
+  },
 ]
 
 const defaultActiveRowIds = [
@@ -123,27 +161,15 @@ function cellKey(rowId: string, colId: string) {
   return `${rowId}__${colId}`
 }
 
-function createDefaultModes(): Record<ColumnModeKey, ColumnModeState> {
-  return {
-    conquest: { x2: false },
-    transcend: { x2: false },
-    sanctuary: { x2: false },
-  }
-}
-
 /** =========================
- *  Row max config (★ TDZ 방지: loadInitialState보다 위에 있어야 함)
- *  =========================
- *  extraMax 규칙:
- *  - extraMax < 0 : 무한
- *  - extraMax = 0 : 추가 bucket 없음
- *  - extraMax > 0 : 제한 있음
- */
+ *  Row max config
+ *  ========================= */
+
 const rowMaxConfig: Record<string, { baseMax: number; extraMax: number }> = {
   'row-shugo': { baseMax: 14, extraMax: 30 },
-  'row-expedition': { baseMax: 21, extraMax: 0 }, // extra 없음으로 취급
+  'row-expedition': { baseMax: 21, extraMax: 0 },
   'row-ode': { baseMax: 840, extraMax: 2000 },
-  'row-chowol': { baseMax: 14, extraMax: 0 }, // extra 없음으로 취급
+  'row-chowol': { baseMax: 14, extraMax: 0 },
   'row-daily': { baseMax: 7, extraMax: 30 },
   'row-awaken': { baseMax: 3, extraMax: 30 },
   'row-boss': { baseMax: 3, extraMax: 30 },
@@ -151,9 +177,7 @@ const rowMaxConfig: Record<string, { baseMax: number; extraMax: number }> = {
   'row-mission': { baseMax: 5, extraMax: 0 },
 }
 
-// 행별 최대치 적용 + 현재값 보정
 function applyMaxConfig(target: HomeworkState) {
-  // 마스터 컨텐츠 기준으로 모두 보정해둠(비활성도 셀 유지)
   for (const row of rowDefs.filter(r => !r.isSection)) {
     const cfg = rowMaxConfig[row.id] ?? {
       baseMax: row.baseMax ?? 0,
@@ -179,6 +203,12 @@ function applyMaxConfig(target: HomeworkState) {
  *  Helpers
  *  ========================= */
 
+function clamp(value: number, min: number, max: number) {
+  if (value < min) return min
+  if (value > max) return max
+  return value
+}
+
 function ensureColumnModes(columns: CharacterColumn[]) {
   for (const col of columns as any[]) {
     const base = createDefaultModes()
@@ -194,21 +224,31 @@ function ensureColumnModes(columns: CharacterColumn[]) {
       const a = col.modes[k].lastAction
       if (a && typeof a !== 'object') col.modes[k].lastAction = undefined
     }
-  }
-}
 
-function clamp(value: number, min: number, max: number) {
-  if (value < min) return min
-  if (value > max) return max
-  return value
+    if (typeof col.conquestM !== 'number' || isNaN(col.conquestM)) col.conquestM = 35
+    if (typeof col.transcendN !== 'number' || isNaN(col.transcendN)) col.transcendN = 28
+    col.conquestM = clamp(col.conquestM, 0, 35)
+    col.transcendN = clamp(col.transcendN, 0, 28)
+
+    if (!col.bossNoReward || typeof col.bossNoReward !== 'object') {
+      col.bossNoReward = createDefaultBossNoReward()
+    } else {
+      col.bossNoReward.conquest = col.bossNoReward.conquest ?? {}
+      col.bossNoReward.transcend = col.bossNoReward.transcend ?? {}
+      if (col.bossNoReward.conquest.lastAction && typeof col.bossNoReward.conquest.lastAction !== 'object') {
+        col.bossNoReward.conquest.lastAction = undefined
+      }
+      if (col.bossNoReward.transcend.lastAction && typeof col.bossNoReward.transcend.lastAction !== 'object') {
+        col.bossNoReward.transcend.lastAction = undefined
+      }
+    }
+  }
 }
 
 function isInfiniteExtra(cell: CounterCell) {
   return cell.extraMax < 0
 }
-
 function hasExtraBucket(cell: CounterCell) {
-  // extraMax === 0 이면 "추가 자체 없음"
   return cell.extraMax !== 0
 }
 
@@ -218,7 +258,6 @@ function planDeduct(cell: CounterCell, amount: number): { base: number; extra: n
   const baseAvail = Math.max(0, cell.baseCurrent)
   const extraAvail = hasExtraBucket(cell) ? Math.max(0, cell.extraCurrent) : 0
   const total = baseAvail + extraAvail
-
   if (total < amount) return null
 
   const baseUse = Math.min(baseAvail, amount)
@@ -244,12 +283,11 @@ function applyAdd(cell: CounterCell, d: { base: number; extra: number }) {
 }
 
 /** =========================
- *  Load state (★ 여기서 applyMaxConfig 호출)
+ *  Load state
  *  ========================= */
 
 function loadInitialState(): HomeworkState {
   if (typeof window !== 'undefined') {
-    // 1) 먼저 v2 시도
     const savedV2 = localStorage.getItem(STORAGE_KEY_V2)
     if (savedV2) {
       try {
@@ -257,9 +295,7 @@ function loadInitialState(): HomeworkState {
         if (parsed && parsed.columns && parsed.cells) {
           ensureColumnModes(parsed.columns)
 
-          if (typeof (parsed as any).membership !== 'boolean') {
-            ;(parsed as any).membership = false
-          }
+          if (typeof (parsed as any).membership !== 'boolean') (parsed as any).membership = false
 
           if (!Array.isArray((parsed as any).activeRowIds)) {
             ;(parsed as any).activeRowIds = [...defaultActiveRowIds]
@@ -277,33 +313,22 @@ function loadInitialState(): HomeworkState {
       }
     }
 
-    // 2) v2 없으면 v1 로드해서 v2 형태로 마이그레이션
     const savedV1 = localStorage.getItem(STORAGE_KEY_V1)
     if (savedV1) {
       try {
         const v1 = JSON.parse(savedV1) as any
-
         if (v1 && v1.columns && v1.cells) {
-          // v1에는 rows가 있었을 수도 있는데 우리는 rowDefs/activeRowIds로 관리
           const migrated: HomeworkState = {
             columns: v1.columns,
             cells: v1.cells,
             lastAutoUpdate: v1.lastAutoUpdate || new Date().toISOString(),
             membership: typeof v1.membership === 'boolean' ? v1.membership : false,
-            activeRowIds: [...defaultActiveRowIds], // v1은 전체 컨텐츠를 항상 보여줬으니 기본 전체 활성
+            activeRowIds: [...defaultActiveRowIds],
           }
 
           ensureColumnModes(migrated.columns)
-
-          // 혹시 v1 columns에 modes가 없는 예전 저장본이면 보정
           applyMaxConfig(migrated)
-
-          // ✅ v2로 저장(마이그레이션 완료)
           localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(migrated))
-
-          // ✅ 원하면 v1 삭제까지 하고 싶으면 아래 주석 해제
-          // localStorage.removeItem(STORAGE_KEY_V1)
-
           return migrated
         }
       } catch {
@@ -312,7 +337,6 @@ function loadInitialState(): HomeworkState {
     }
   }
 
-  // 3) 아무것도 없으면 새로 생성
   const base: HomeworkState = {
     columns: defaultColumns,
     cells: {},
@@ -345,16 +369,10 @@ function getCell(rowId: string, colId: string) {
 
   if (!cell) {
     const cfg = rowMaxConfig[rowId] ?? { baseMax: def?.baseMax ?? 0, extraMax: def?.extraMax ?? 0 }
-    cell = {
-      baseCurrent: 0,
-      baseMax: cfg.baseMax,
-      extraCurrent: 0,
-      extraMax: cfg.extraMax,
-    }
+    cell = { baseCurrent: 0, baseMax: cfg.baseMax, extraCurrent: 0, extraMax: cfg.extraMax }
     state.value.cells[key] = cell
   }
 
-  // max 동기화
   const cfg = rowMaxConfig[rowId] ?? { baseMax: def?.baseMax ?? 0, extraMax: def?.extraMax ?? 0 }
   cell.baseMax = cfg.baseMax
   cell.extraMax = cfg.extraMax
@@ -368,16 +386,44 @@ function getCell(rowId: string, colId: string) {
 }
 
 /** =========================
- *  Mode actions (정복/초월/성역)
+ *  M/N helpers
  *  ========================= */
 
 function getCol(colId: string) {
   return state.value.columns.find(c => c.id === colId)
 }
 
+function canUseM(colId: string, amount: number) {
+  const col = getCol(colId)
+  if (!col) return false
+  return col.conquestM >= amount
+}
+
+function canUseN(colId: string, amount: number) {
+  const col = getCol(colId)
+  if (!col) return false
+  return col.transcendN >= amount
+}
+
+function applyMN(colId: string, mn: ColumnMNLog) {
+  const col = getCol(colId)
+  if (!col) return
+  if (typeof mn.mDelta === 'number') col.conquestM = clamp(col.conquestM + mn.mDelta, 0, 35)
+  if (typeof mn.nDelta === 'number') col.transcendN = clamp(col.transcendN + mn.nDelta, 0, 28)
+}
+
+/** =========================
+ *  Mode actions + Undo (M/N 포함)
+ *  ========================= */
+
 function doConquest(colId: string) {
   const col = getCol(colId)
   if (!col) return
+
+  if (!canUseM(colId, 1)) {
+    window.alert('M이 0이라 정복을 진행할 수 없습니다.')
+    return
+  }
 
   const x2 = !!col.modes.conquest.x2
   const odeCost = x2 ? 80 : 40
@@ -400,9 +446,12 @@ function doConquest(colId: string) {
   applyDeduct(ticketCell, ticketDeduct)
   applyDeduct(odeCell, odeDeduct)
 
+  applyMN(colId, { mDelta: -1 })
+
   col.modes.conquest.lastAction = {
     ticket: { rowId: 'row-expedition', ...ticketDeduct },
     ode: { rowId: 'row-ode', ...odeDeduct },
+    mn: { mDelta: -1 },
     at: new Date().toISOString(),
   }
 }
@@ -410,6 +459,11 @@ function doConquest(colId: string) {
 function doTranscend(colId: string) {
   const col = getCol(colId)
   if (!col) return
+
+  if (!canUseN(colId, 1)) {
+    window.alert('N이 0이라 초월을 진행할 수 없습니다.')
+    return
+  }
 
   const x2 = !!col.modes.transcend.x2
   const odeCost = x2 ? 80 : 40
@@ -432,9 +486,12 @@ function doTranscend(colId: string) {
   applyDeduct(ticketCell, ticketDeduct)
   applyDeduct(odeCell, odeDeduct)
 
+  applyMN(colId, { nDelta: -1 })
+
   col.modes.transcend.lastAction = {
     ticket: { rowId: 'row-chowol', ...ticketDeduct },
     ode: { rowId: 'row-ode', ...odeDeduct },
+    mn: { nDelta: -1 },
     at: new Date().toISOString(),
   }
 }
@@ -477,7 +534,70 @@ function undoMode(colId: string, mode: ColumnModeKey) {
     applyAdd(cell, { base: action.ode.base, extra: action.ode.extra })
   }
 
+  if (action.mn) {
+    const undo: ColumnMNLog = {}
+    if (typeof action.mn.mDelta === 'number') undo.mDelta = -action.mn.mDelta
+    if (typeof action.mn.nDelta === 'number') undo.nDelta = -action.mn.nDelta
+    applyMN(colId, undo)
+  }
+
   col.modes[mode].lastAction = undefined
+}
+
+/** =========================
+ *  "보상X 보스처치" + Undo (버튼 내부)
+ *  ========================= */
+
+function doBossNoRewardConquest(colId: string) {
+  if (!canUseM(colId, 1)) {
+    window.alert('M이 0이라 보스처치를 체크할 수 없습니다.')
+    return
+  }
+
+  const col = getCol(colId)
+  if (!col) return
+
+  applyMN(colId, { mDelta: -1 })
+  col.bossNoReward.conquest.lastAction = {
+    mn: { mDelta: -1 },
+    at: new Date().toISOString(),
+  }
+}
+
+function undoBossNoRewardConquest(colId: string) {
+  const col = getCol(colId)
+  if (!col) return
+  const a = col.bossNoReward.conquest.lastAction
+  if (!a) return
+
+  applyMN(colId, { mDelta: +1 })
+  col.bossNoReward.conquest.lastAction = undefined
+}
+
+function doBossNoRewardTranscend(colId: string) {
+  if (!canUseN(colId, 1)) {
+    window.alert('N이 0이라 보스처치를 체크할 수 없습니다.')
+    return
+  }
+
+  const col = getCol(colId)
+  if (!col) return
+
+  applyMN(colId, { nDelta: -1 })
+  col.bossNoReward.transcend.lastAction = {
+    mn: { nDelta: -1 },
+    at: new Date().toISOString(),
+  }
+}
+
+function undoBossNoRewardTranscend(colId: string) {
+  const col = getCol(colId)
+  if (!col) return
+  const a = col.bossNoReward.transcend.lastAction
+  if (!a) return
+
+  applyMN(colId, { nDelta: +1 })
+  col.bossNoReward.transcend.lastAction = undefined
 }
 
 /** =========================
@@ -497,9 +617,15 @@ function confirmAddColumn() {
   if (!name) return
 
   const id = `char-${Date.now()}`
-  state.value.columns.push({ id, name, modes: createDefaultModes() })
+  state.value.columns.push({
+    id,
+    name,
+    modes: createDefaultModes(),
+    conquestM: 35,
+    transcendN: 28,
+    bossNoReward: createDefaultBossNoReward(),
+  })
 
-  // 마스터 기준으로 모든 컨텐츠에 셀 생성
   for (const row of rowDefs.filter(r => !r.isSection)) {
     getCell(row.id, id)
   }
@@ -522,7 +648,6 @@ function removeColumn(colId: string) {
 
   state.value.columns.splice(idx, 1)
 
-  // 모든 row에 대해 해당 colId 셀 삭제
   for (const row of rowDefs.filter(r => !r.isSection)) {
     delete state.value.cells[cellKey(row.id, colId)]
   }
@@ -621,7 +746,6 @@ const displayRowDefs = computed<RowDef[]>(() => {
   return out
 })
 
-// 컨텐츠 추가 다이얼로그
 const addContentDialog = ref(false)
 const selectedContentId = ref<string | null>(null)
 
@@ -643,7 +767,6 @@ function insertActiveRow(rowId: string) {
   const ids = state.value.activeRowIds
   if (ids.includes(rowId)) return
 
-  // 같은 섹션 마지막 뒤로 넣기
   let insertAt = -1
   for (let i = ids.length - 1; i >= 0; i--) {
     const d = getRowDefById(ids[i])
@@ -669,7 +792,6 @@ function removeContentRow(rowId: string) {
   const name = def?.label ?? '컨텐츠'
   if (!window.confirm(`"${name}" 컨텐츠를 목록에서 제거할까요?`)) return
 
-  // cells는 삭제하지 않음(값 유지)
   state.value.activeRowIds = state.value.activeRowIds.filter(id => id !== rowId)
 
   if (draggingRowId.value === rowId) draggingRowId.value = null
@@ -749,7 +871,6 @@ function makeAnchorAtHour(hour: number) {
 }
 
 const ANCHOR_5 = makeAnchorAtHour(5)
-
 const ANCHOR_WED_5 = (() => {
   const d = makeAnchorAtHour(5)
   while (d.getDay() !== 3) d.setDate(d.getDate() + 1)
@@ -816,6 +937,19 @@ function handleAutoIncrease() {
     setBaseToMax('row-daily')
     setBaseToMax('row-awaken')
     setBaseToMax('row-boss')
+
+    // ✅ 수요일 5시: M/N 최대치로 갱신
+    for (const col of state.value.columns) {
+      col.conquestM = 35
+      col.transcendN = 28
+
+      // 갱신 시점엔 Undo 꼬임 방지로 초기화
+      col.modes.conquest.lastAction = undefined
+      col.modes.transcend.lastAction = undefined
+      col.modes.sanctuary.lastAction = undefined
+      col.bossNoReward.conquest.lastAction = undefined
+      col.bossNoReward.transcend.lastAction = undefined
+    }
   }
 
   const dimensionEvents = countPeriodicEvents(last, now, ANCHOR_5, DAY_MS)
@@ -935,70 +1069,125 @@ onBeforeUnmount(() => {
                       </div>
 
                       <div class="hw-mode-row">
-                        <!-- 정복 -->
-                        <div class="hw-mode-card" @click="doConquest(col.id)">
-                          <div class="hw-mode-left">
-                            <span class="hw-mode-label">정복</span>
-                          </div>
-                          <div class="hw-mode-right">
-                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
-                              <input type="checkbox" v-model="col.modes.conquest.x2" />
-                              <span class="hw-x2-box" aria-hidden="true"></span>
-                              <span class="hw-x2-text">x2</span>
-                            </label>
+                        <!-- ✅ 정복 -->
+                        <div class="hw-mode-stack">
+                          <div class="hw-mode-card" @click="doConquest(col.id)">
+                            <div class="hw-mode-left">
+                              <div class="hw-mode-left-stack">
+                                <span class="hw-mode-label">정복</span>
+                                <span class="hw-mode-sub">{{ col.conquestM }}/35</span>
+                              </div>
+                            </div>
+                            <div class="hw-mode-right">
+                              <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                                <input type="checkbox" v-model="col.modes.conquest.x2" />
+                                <span class="hw-x2-box" aria-hidden="true"></span>
+                                <span class="hw-x2-text">x2</span>
+                              </label>
 
-                            <v-btn
-                              class="hw-undo-btn"
-                              icon
-                              size="x-small"
-                              variant="flat"
-                              @click.stop="undoMode(col.id, 'conquest')"
-                            >
-                              ↶
-                            </v-btn>
+                              <v-btn
+                                class="hw-undo-btn"
+                                icon
+                                size="x-small"
+                                variant="flat"
+                                @click.stop="undoMode(col.id, 'conquest')"
+                                title="정복 되돌리기"
+                              >
+                                ↶
+                              </v-btn>
+                            </div>
+                          </div>
+
+                          <!-- ✅ 보스처치X: 정복과 동일 폭, Undo 버튼도 내부로 -->
+                          <div class="hw-under-card" @click.stop="doBossNoRewardConquest(col.id)">
+                            <div class="hw-under-left">
+                              <span class="hw-under-label">보상X 보스처치</span>
+                            </div>
+                            <div class="hw-under-right">
+                              <v-btn
+                                class="hw-undo-btn hw-undo-mini"
+                                icon
+                                size="x-small"
+                                variant="flat"
+                                @click.stop="undoBossNoRewardConquest(col.id)"
+                                title="보스처치 되돌리기"
+                              >
+                                ↶
+                              </v-btn>
+                            </div>
                           </div>
                         </div>
 
-                        <!-- 초월 -->
-                        <div class="hw-mode-card" @click="doTranscend(col.id)">
-                          <div class="hw-mode-left">
-                            <span class="hw-mode-label">초월</span>
-                          </div>
-                          <div class="hw-mode-right">
-                            <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
-                              <input type="checkbox" v-model="col.modes.transcend.x2" />
-                              <span class="hw-x2-box" aria-hidden="true"></span>
-                              <span class="hw-x2-text">x2</span>
-                            </label>
+                        <!-- ✅ 초월 -->
+                        <div class="hw-mode-stack">
+                          <div class="hw-mode-card" @click="doTranscend(col.id)">
+                            <div class="hw-mode-left">
+                              <div class="hw-mode-left-stack">
+                                <span class="hw-mode-label">초월</span>
+                                <span class="hw-mode-sub">{{ col.transcendN }}/28</span>
+                              </div>
+                            </div>
+                            <div class="hw-mode-right">
+                              <label class="hw-x2" @mousedown.stop @click.stop @touchstart.stop>
+                                <input type="checkbox" v-model="col.modes.transcend.x2" />
+                                <span class="hw-x2-box" aria-hidden="true"></span>
+                                <span class="hw-x2-text">x2</span>
+                              </label>
 
-                            <v-btn
-                              class="hw-undo-btn"
-                              icon
-                              size="x-small"
-                              variant="flat"
-                              @click.stop="undoMode(col.id, 'transcend')"
-                            >
-                              ↶
-                            </v-btn>
+                              <v-btn
+                                class="hw-undo-btn"
+                                icon
+                                size="x-small"
+                                variant="flat"
+                                @click.stop="undoMode(col.id, 'transcend')"
+                                title="초월 되돌리기"
+                              >
+                                ↶
+                              </v-btn>
+                            </div>
+                          </div>
+
+                          <!-- ✅ 보스처치X: 초월과 동일 폭, Undo 버튼도 내부로 -->
+                          <div class="hw-under-card" @click.stop="doBossNoRewardTranscend(col.id)">
+                            <div class="hw-under-left">
+                              <span class="hw-under-label">보상X 보스처치</span>
+                            </div>
+                            <div class="hw-under-right">
+                              <v-btn
+                                class="hw-undo-btn hw-undo-mini"
+                                icon
+                                size="x-small"
+                                variant="flat"
+                                @click.stop="undoBossNoRewardTranscend(col.id)"
+                                title="보스처치 되돌리기"
+                              >
+                                ↶
+                              </v-btn>
+                            </div>
                           </div>
                         </div>
 
-                        <!-- 성역 -->
-                        <div class="hw-mode-card" @click="doSanctuary(col.id)">
-                          <div class="hw-mode-left">
-                            <span class="hw-mode-label">성역</span>
+                        <!-- ✅ 성역: 정복카드 높이 + 보스처치X 높이(+간격) 만큼 "한 덩어리" -->
+                        <div class="hw-mode-stack">
+                          <div class="hw-mode-card hw-sanctuary-tall" @click="doSanctuary(col.id)">
+                            <div class="hw-mode-left">
+                              <span class="hw-mode-label">성역</span>
+                            </div>
+                            <div class="hw-mode-right hw-sanctuary-check">
+                              <v-btn
+                                class="hw-undo-btn"
+                                icon
+                                size="x-small"
+                                variant="flat"
+                                @click.stop="undoMode(col.id, 'sanctuary')"
+                                title="성역 되돌리기"
+                              >
+                                ↶
+                              </v-btn>
+                            </div>
                           </div>
-                          <div class="hw-mode-right hw-sanctuary-check">
-                            <v-btn
-                              class="hw-undo-btn"
-                              icon
-                              size="x-small"
-                              variant="flat"
-                              @click.stop="undoMode(col.id, 'sanctuary')"
-                            >
-                              ↶
-                            </v-btn>
-                          </div>
+                          <!-- 스택 폭 유지용 (UI 균형) -->
+                          <div class="hw-under-spacer"></div>
                         </div>
                       </div>
                     </div>
@@ -1258,10 +1447,26 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   margin-top: 6px;
+
+  /* ✅ 높이 규격(성역 tall 계산에 사용) */
+  --modeH: 86px;
+  --underH: 30px;
+  --stackGap: 6px;
 }
-.hw-mode-card {
+
+/* 카드+보스버튼 세트 */
+.hw-mode-stack {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--stackGap);
+}
+
+/* 메인 카드 */
+.hw-mode-card {
+  width: 100%;
+  min-height: var(--modeH);
   display: grid;
   grid-template-columns: 1fr 64px;
   align-items: stretch;
@@ -1270,23 +1475,41 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.10);
   overflow: hidden;
 }
+
 .hw-mode-left {
   display: flex;
   align-items: center;
   padding: 10px 10px;
 }
+
+.hw-mode-left-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .hw-mode-label {
   font-size: 20px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 0.02em;
 }
+
+.hw-mode-sub {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.85;
+  letter-spacing: 0.02em;
+}
+
 .hw-mode-right {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 13px 13px;
 }
+
 .hw-x2 {
   display: flex;
   align-items: center;
@@ -1322,6 +1545,7 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.88);
   text-transform: uppercase;
 }
+
 .hw-undo-btn {
   align-self: flex-end;
   width: 32px;
@@ -1336,6 +1560,61 @@ onBeforeUnmount(() => {
 .hw-undo-btn:hover {
   background: rgba(255, 255, 255, 0.18) !important;
 }
+
+/* ✅ 보스처치X 버튼(정복/초월 카드와 같은 폭) */
+.hw-under-card {
+  width: 100%;
+  min-height: var(--underH);
+  display: grid;
+  grid-template-columns: 1fr 46px;
+  align-items: center;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+
+.hw-under-left {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.hw-under-label {
+  font-size: 11px;
+  font-weight: 900;
+  opacity: 0.9;
+  letter-spacing: 0.02em;
+}
+
+.hw-under-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 8px;
+}
+
+.hw-undo-mini {
+  width: 30px !important;
+  height: 30px !important;
+  font-size: 16px !important;
+  padding-top: 2px !important;
+  align-self: center !important;
+}
+
+/* ✅ 성역을 "정복 카드 + 보스버튼 + gap" 높이로 */
+.hw-sanctuary-tall {
+  min-height: calc(var(--modeH) + var(--underH) + var(--stackGap));
+}
+
+.hw-under-spacer {
+  min-height: var(--underH);
+  opacity: 0;
+}
+
+/* 성역 체크 */
 .hw-sanctuary-check {
   margin: auto;
 }

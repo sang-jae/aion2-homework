@@ -1,4 +1,14 @@
 <!-- src/pages/index.vue -->
+ <script setup>
+const test = () => {
+  const targetUrl = "https://aion2tool.com/char/serverid=2001/%EB%9A%9C%EC%9D%B4%EB%82%98";
+  fetch(`/api/aion2/score?url=${encodeURIComponent(targetUrl)}`)
+    .then(r => r.json())
+    .then(console.log);
+}
+
+ </script>
+
 <template>
   <v-container class="py-8">
     <h1 class="text-h4 mb-2">사용법</h1>
@@ -32,6 +42,7 @@
       <p class="text-body-1">
       - 2026/01/14 : 캐릭터 삭제기능이 추가되었습니다. 멤버십에 따라 슈고 열쇠 충전 횟수가 달라질 수 있도록 변경하였습니다.
     </p>
+    <v-btn @click="test()">123</v-btn>
   </v-container>
 </template>
 
