@@ -94,7 +94,7 @@ function incExtra(delta: number) {
             @blur="clampExtra"
           />
           <span class="hw-max hw-max-extra">
-						/ {{ cell.extraMax < 0 ? '∞' : cell.extraMax }}
+						/ {{ props.cell.extraMax < 0 ? '∞' : props.cell.extraMax }}
           </span>
         </div>
 

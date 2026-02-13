@@ -167,9 +167,9 @@ function cellKey(rowId: string, colId: string) {
 
 const rowMaxConfig: Record<string, { baseMax: number; extraMax: number }> = {
   'row-shugo': { baseMax: 14, extraMax: 30 },
-  'row-expedition': { baseMax: 21, extraMax: 0 },
+  'row-expedition': { baseMax: 21, extraMax: -1 },
   'row-ode': { baseMax: 840, extraMax: 2000 },
-  'row-chowol': { baseMax: 14, extraMax: 0 },
+  'row-chowol': { baseMax: 14, extraMax: -1 },
   'row-daily': { baseMax: 7, extraMax: 30 },
   'row-awaken': { baseMax: 3, extraMax: 30 },
   'row-boss': { baseMax: 3, extraMax: 30 },
